@@ -39,6 +39,10 @@ static SampleRef resolve_sample(const char *token, const SampleRegistry *default
     strncpy(token_copy, token, sizeof(token_copy) - 1);
     token_copy[sizeof(token_copy) - 1] = '\0';
 
+    if (token_copy[0] == '~' && token_copy[1] == '\0') {
+        return ref;
+    }
+
     char *variant_sep = strchr(token_copy, ':');
     size_t variant_index = 0;
     if (variant_sep) {
