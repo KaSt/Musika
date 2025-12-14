@@ -60,6 +60,10 @@ static char *load_file(const char *path, size_t *out_len) {
     }
     size_t read_len = fread(buf, 1, (size_t)len, f);
     fclose(f);
+    if (read_len != (size_t)len) {
+        free(buf);
+        return NULL;
+    }
     buf[read_len] = '\0';
     if (out_len) *out_len = read_len;
     return buf;
@@ -237,13 +241,21 @@ bool sample_registry_load_default(SampleRegistry *registry) {
 
     size_t len = 0;
     char *json = load_file("assets/default_samplemap.json", &len);
-    if (!json || len == 0) {
-        free(json);
-        json = dup_range(embedded_default_map, strlen(embedded_default_map));
+    bool ok = false;
+    if (json && len > 0) {
+        ok = parse_object(json, registry);
     }
-    if (!json) return false;
+    if (!ok) {
+        free(json);
+        sample_registry_free(registry);
+        memset(registry, 0, sizeof(*registry));
+        registry->name = dup_range("default", strlen("default"));
+        if (!registry->name) return false;
+        json = dup_range(embedded_default_map, strlen(embedded_default_map));
+        if (!json) return false;
+        ok = parse_object(json, registry);
+    }
 
-    bool ok = parse_object(json, registry);
     free(json);
     if (!ok) {
         sample_registry_free(registry);
