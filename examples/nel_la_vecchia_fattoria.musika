@@ -1,1 +1,5 @@
-g4/4 g4/4 g4/4 d4/2 e4/4 e4/4 d4/2 b4/4 b4/4 a4/4 a4/4 g4/2 ~ bd hh sd hh
+@sample("tone").note("g4/4 g4/4 g4/4 d4/2 e4/4 e4/4 d4/2 b4/4 b4/4 a4/4 a4/4 g4/2")
+@sample("bd").note("x ~")
+@sample("hh").note("x x")
+@sample("sd").note("x x")
+@sample("hh").note("x x")
