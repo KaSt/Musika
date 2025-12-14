@@ -7,7 +7,7 @@
 
 static const char *embedded_default_map =
     "{\n"
-    "  \"_base\": \"assets/samples\",\n"
+    "  \"_base\": \"https://github.com/dxinteractive/strudel-samples/raw/main/\",\n"
     "  \"bd\": [\n"
     "    \"bd/boom.wav\",\n"
     "    \"bd/doom.wav\"\n"
@@ -126,11 +126,25 @@ static bool parse_value(const char **p, SampleSound *sound) {
                     return false;
                 }
                 free(val);
+                s = skip_ws(s);
+                if (*s == ',') {
+                    s++;
+                    continue;
+                }
+                if (*s == ']') {
+                    break;
+                }
+                return false;
             }
             s = skip_ws(s);
+            if (*s == ']') {
+                break;
+            }
             if (*s == ',') {
                 s++;
+                continue;
             }
+            return false;
         }
         if (*s == ']') {
             *p = s + 1;

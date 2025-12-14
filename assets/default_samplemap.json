@@ -1,5 +1,5 @@
 {
-  "_base": "assets/samples",
+  "_base": "https://github.com/dxinteractive/strudel-samples/raw/main/",
   "bd": [
     "bd/boom.wav",
     "bd/doom.wav"
