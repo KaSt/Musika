@@ -7,6 +7,7 @@
 #include "config.h"
 #include "editor.h"
 #include "pattern.h"
+#include "samplemap.h"
 #include "transport.h"
 #include "../audio/audio.h"
 
@@ -147,16 +148,32 @@ static void run_loop(MusikaConfig *config) {
 
 int main(int argc, char **argv) {
     MusikaConfig config;
+    SampleRegistry registry;
     const char *config_path = "config.json";
     load_config(config_path, &config);
 
+    if (!sample_registry_load_default(&registry)) {
+        fprintf(stderr, "Failed to load default sample map.\n");
+        free_config(&config);
+        return 1;
+    }
+
+    if (argc > 1 && strcmp(argv[1], "--list-sounds") == 0) {
+        sample_registry_print(&registry, stdout);
+        sample_registry_free(&registry);
+        free_config(&config);
+        return 0;
+    }
+
     if (argc > 1 && strcmp(argv[1], "--beep") == 0) {
         int rc = run_beep_mode();
+        sample_registry_free(&registry);
         free_config(&config);
         return rc;
     }
 
     run_loop(&config);
+    sample_registry_free(&registry);
     free_config(&config);
     return 0;
 }

@@ -1,0 +1,25 @@
+{
+  "_base": "https://cdn.jsdelivr.net/gh/dxinteractive/strudel-samples@main/",
+  "bd": [
+    "bd/boom.wav",
+    "bd/doom.wav"
+  ],
+  "sd": [
+    "sd/snare.wav",
+    "sd/tight.wav"
+  ],
+  "hh": [
+    "hh/hat1.wav",
+    "hh/hat2.wav",
+    "hh/hat3.wav",
+    "hh/hat4.wav"
+  ],
+  "oh": [
+    "oh/open1.wav",
+    "oh/open2.wav"
+  ],
+  "misc": [
+    "misc/cowbell.wav",
+    "misc/clap.wav"
+  ]
+}
