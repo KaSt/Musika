@@ -73,12 +73,18 @@ def check_history():
         seen_hashes.add(obj_hash)
 
         try:
-            blob = subprocess.check_output(["git", "show", obj_hash])
+            with subprocess.Popen(
+                ["git", "cat-file", "-p", obj_hash], stdout=subprocess.PIPE
+            ) as proc:
+                chunk = proc.stdout.read(4096) if proc.stdout else b""
+                proc.communicate()
+                if proc.returncode not in (0, None):
+                    raise subprocess.CalledProcessError(proc.returncode, proc.args)
         except subprocess.CalledProcessError as exc:
             suspicious.append((path, f"unreadable from history: {exc}"))
             continue
 
-        reason = check_blob(path, blob)
+        reason = check_blob(path, chunk)
         if reason:
             suspicious.append((path, reason))
 
