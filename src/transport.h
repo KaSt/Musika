@@ -23,6 +23,13 @@ typedef struct {
     double next_event_time;
     size_t next_step;
 
+    struct {
+        char key[256];
+        AudioSample sample;
+        bool loaded;
+    } sample_cache[128];
+    size_t sample_cache_count;
+
     pthread_t thread;
 } Transport;
 

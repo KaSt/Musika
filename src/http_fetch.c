@@ -1,62 +1,77 @@
 #include "http_fetch.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Minimal fetch helper that shells out to curl to avoid adding heavy dependencies.
+#include <curl/curl.h>
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t capacity;
+} HttpBuffer;
+
+static size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    HttpBuffer *buf = (HttpBuffer *)userdata;
+    size_t total = size * nmemb;
+    if (total == 0) return 0;
+
+    if (buf->len + total + 1 > buf->capacity) {
+        size_t new_capacity = buf->capacity ? buf->capacity * 2 : 4096;
+        while (new_capacity < buf->len + total + 1) {
+            new_capacity *= 2;
+        }
+        char *next = realloc(buf->data, new_capacity);
+        if (!next) return 0;
+        buf->data = next;
+        buf->capacity = new_capacity;
+    }
+
+    memcpy(buf->data + buf->len, ptr, total);
+    buf->len += total;
+    buf->data[buf->len] = '\0';
+    return total;
+}
+
 bool http_fetch_to_buffer(const char *url, char **out_buffer, size_t *out_len) {
     if (!url || !out_buffer) return false;
     *out_buffer = NULL;
     if (out_len) *out_len = 0;
 
-    char cmd[1024];
-    if (snprintf(cmd, sizeof(cmd), "curl -L -s %s", url) >= (int)sizeof(cmd)) {
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
         return false;
     }
 
-    FILE *pipe = popen(cmd, "r");
-    if (!pipe) return false;
-
-    size_t capacity = 4096;
-    size_t len = 0;
-    char *buffer = malloc(capacity);
-    if (!buffer) {
-        pclose(pipe);
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        curl_global_cleanup();
         return false;
     }
 
-    size_t nread;
-    while ((nread = fread(buffer + len, 1, capacity - len, pipe)) > 0) {
-        len += nread;
-        if (len == capacity) {
-            capacity *= 2;
-            char *next = realloc(buffer, capacity);
-            if (!next) {
-                free(buffer);
-                pclose(pipe);
-                return false;
-            }
-            buffer = next;
-        }
-    }
-    pclose(pipe);
+    HttpBuffer buffer = {.data = NULL, .len = 0, .capacity = 0};
 
-    if (len == 0) {
-        free(buffer);
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Musika/1.0");
+
+    CURLcode res = curl_easy_perform(curl);
+    long response_code = 0;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+    }
+
+    curl_easy_cleanup(curl);
+    curl_global_cleanup();
+
+    if (res != CURLE_OK || response_code >= 400 || buffer.len == 0) {
+        free(buffer.data);
         return false;
     }
-    if (len == capacity) {
-        char *next = realloc(buffer, capacity + 1);
-        if (!next) {
-            free(buffer);
-            return false;
-        }
-        buffer = next;
-    }
-    buffer[len] = '\0';
-    *out_buffer = buffer;
-    if (out_len) *out_len = len;
+
+    *out_buffer = buffer.data;
+    if (out_len) *out_len = buffer.len;
     return true;
 }
 

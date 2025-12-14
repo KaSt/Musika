@@ -4,8 +4,17 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#include "samplemap.h"
+
 typedef struct {
-    int sample_id;
+    const SampleRegistry *registry;
+    const SampleSound *sound;
+    size_t variant_index;
+    bool valid;
+} SampleRef;
+
+typedef struct {
+    SampleRef sample;
     double duration_beats;
 } PatternStep;
 
@@ -14,6 +23,6 @@ typedef struct {
     size_t step_count;
 } Pattern;
 
-bool pattern_from_lines(char **lines, size_t line_count, Pattern *out_pattern);
+bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *default_registry, const SampleRegistry *user_registry, Pattern *out_pattern);
 
 #endif // MUSIKA_PATTERN_H

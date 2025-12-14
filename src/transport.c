@@ -2,14 +2,111 @@
 
 #include <math.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
+#include "cache.h"
+#include "http_fetch.h"
 static void sleep_ms(int ms) {
     struct timespec ts;
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (ms % 1000) * 1000000L;
     nanosleep(&ts, NULL);
+}
+
+static bool file_exists(const char *path) {
+    struct stat st;
+    return path && stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static bool build_variant_url(const SampleRef *ref, char *out, size_t out_len) {
+    if (!ref || !ref->sound || ref->variant_index >= ref->sound->variant_count || !out || out_len == 0) return false;
+    const char *variant = ref->sound->variants ? ref->sound->variants[ref->variant_index] : NULL;
+    if (!variant || variant[0] == '\0') return false;
+
+    if (strncmp(variant, "http://", 7) == 0 || strncmp(variant, "https://", 8) == 0) {
+        return snprintf(out, out_len, "%s", variant) < (int)out_len;
+    }
+
+    const char *base = (ref->registry && ref->registry->base) ? ref->registry->base : NULL;
+    if (base && base[0]) {
+        size_t base_len = strlen(base);
+        bool needs_slash = base_len > 0 && base[base_len - 1] != '/' && variant[0] != '/';
+        if (needs_slash) {
+            return snprintf(out, out_len, "%s/%s", base, variant) < (int)out_len;
+        }
+        return snprintf(out, out_len, "%s%s", base, variant) < (int)out_len;
+    }
+
+    return snprintf(out, out_len, "%s", variant) < (int)out_len;
+}
+
+static bool ensure_cached_sample(const char *url, char *out_path, size_t out_len) {
+    if (!url || !out_path || out_len == 0) return false;
+    if (!cache_path_for_key_with_ext(url, ".wav", out_path, out_len)) return false;
+    if (file_exists(out_path)) return true;
+
+    char *buffer = NULL;
+    size_t len = 0;
+    if (!http_fetch_to_buffer(url, &buffer, &len)) return false;
+    bool ok = cache_write(out_path, buffer, len);
+    free(buffer);
+    return ok;
+}
+
+static const AudioSample *load_sample_for_ref(Transport *t, const SampleRef *ref) {
+    if (!t || !ref || !ref->valid) return NULL;
+    if (!ref->sound || ref->variant_index >= ref->sound->variant_count) return NULL;
+
+    const char *registry_name = (ref->registry && ref->registry->name) ? ref->registry->name : "default";
+    char cache_key[256];
+    if (snprintf(cache_key, sizeof(cache_key), "%s:%s:%zu", registry_name, ref->sound->name, ref->variant_index) >= (int)sizeof(cache_key)) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < t->sample_cache_count; ++i) {
+        if (t->sample_cache[i].loaded && strcmp(t->sample_cache[i].key, cache_key) == 0) {
+            return &t->sample_cache[i].sample;
+        }
+    }
+
+    if (t->sample_cache_count >= sizeof(t->sample_cache) / sizeof(t->sample_cache[0])) {
+        return NULL;
+    }
+
+    char url[512];
+    if (!build_variant_url(ref, url, sizeof(url))) {
+        return (t->sample_count > 0) ? &t->samples[0] : NULL;
+    }
+
+    char path[512];
+    if (!ensure_cached_sample(url, path, sizeof(path))) {
+        return (t->sample_count > 0) ? &t->samples[0] : NULL;
+    }
+
+    AudioSample sample;
+    if (!audio_sample_from_wav(path, &sample)) {
+        return (t->sample_count > 0) ? &t->samples[0] : NULL;
+    }
+
+    size_t slot = t->sample_cache_count++;
+    t->sample_cache[slot].loaded = true;
+    snprintf(t->sample_cache[slot].key, sizeof(t->sample_cache[slot].key), "%s", cache_key);
+    t->sample_cache[slot].sample = sample;
+    return &t->sample_cache[slot].sample;
+}
+
+static void free_cached_samples(Transport *t) {
+    if (!t) return;
+    for (size_t i = 0; i < t->sample_cache_count; ++i) {
+        if (t->sample_cache[i].loaded) {
+            audio_sample_free(&t->sample_cache[i].sample);
+            t->sample_cache[i].loaded = false;
+        }
+    }
+    t->sample_cache_count = 0;
 }
 
 static void *transport_thread(void *user) {
@@ -34,9 +131,12 @@ static void *transport_thread(void *user) {
 
         while (t->next_event_time <= horizon) {
             PatternStep *step = &pattern->steps[t->next_step];
-            if (step->sample_id >= 0 && (size_t)step->sample_id < t->sample_count) {
-                uint64_t start_frame = (uint64_t)(t->next_event_time * (double)t->audio->sample_rate);
-                audio_engine_queue(t->audio, &t->samples[step->sample_id], start_frame);
+            if (step->sample.valid) {
+                const AudioSample *sample = load_sample_for_ref(t, &step->sample);
+                if (sample) {
+                    uint64_t start_frame = (uint64_t)(t->next_event_time * (double)t->audio->sample_rate);
+                    audio_engine_queue(t->audio, sample, start_frame);
+                }
             }
             t->next_event_time += step->duration_beats * t->seconds_per_beat;
             t->next_step = (t->next_step + 1) % pattern->step_count;
@@ -58,6 +158,7 @@ bool transport_start(Transport *transport, AudioEngine *audio, AudioSample *samp
     atomic_store(&transport->playing, false);
     transport->next_event_time = 0.0;
     transport->next_step = 0;
+    transport->sample_cache_count = 0;
 
     if (pthread_create(&transport->thread, NULL, transport_thread, transport) != 0) {
         atomic_store(&transport->running, false);
@@ -70,6 +171,7 @@ void transport_stop(Transport *transport) {
     if (!transport) return;
     atomic_store(&transport->running, false);
     pthread_join(transport->thread, NULL);
+    free_cached_samples(transport);
 }
 
 void transport_set_pattern(Transport *transport, const Pattern *pattern) {

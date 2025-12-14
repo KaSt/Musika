@@ -27,7 +27,7 @@ static bool ensure_dir(const char *path) {
     return false;
 }
 
-bool cache_path_for_key(const char *key, char *out_path, size_t out_len) {
+bool cache_path_for_key_with_ext(const char *key, const char *ext, char *out_path, size_t out_len) {
     if (!key || !out_path || out_len == 0) return false;
     const char *home = getenv("HOME");
     if (!home || strlen(home) == 0) return false;
@@ -39,8 +39,13 @@ bool cache_path_for_key(const char *key, char *out_path, size_t out_len) {
     if (!ensure_dir(musika_dir)) return false;
 
     unsigned long hash = fnv1a(key);
-    if (snprintf(out_path, out_len, "%s/%lx.json", musika_dir, hash) >= (int)out_len) return false;
+    const char *extension = (ext && ext[0]) ? ext : ".json";
+    if (snprintf(out_path, out_len, "%s/%lx%s", musika_dir, hash, extension) >= (int)out_len) return false;
     return true;
+}
+
+bool cache_path_for_key(const char *key, char *out_path, size_t out_len) {
+    return cache_path_for_key_with_ext(key, ".json", out_path, out_len);
 }
 
 bool cache_write(const char *path, const char *data, size_t len) {
