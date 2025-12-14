@@ -2,25 +2,84 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { TOKEN_BUFFER_LEN = 64 };
 
-static int map_token_to_sample(const char *token) {
-    if (strcmp(token, "kick") == 0 || strcmp(token, "bd") == 0 || strcmp(token, "bass") == 0) {
-        return 0;
-    }
-    return -1;
-}
-
-static void add_step(Pattern *pattern, int sample_id, double duration) {
+static void add_step(Pattern *pattern, const SampleRef *sample, int sample_id, double duration) {
     if (pattern->step_count >= sizeof(pattern->steps) / sizeof(pattern->steps[0])) return;
+    pattern->steps[pattern->step_count].sample = *sample;
     pattern->steps[pattern->step_count].sample_id = sample_id;
     pattern->steps[pattern->step_count].duration_beats = duration;
     pattern->step_count += 1;
 }
 
-bool pattern_from_lines(char **lines, size_t line_count, Pattern *out_pattern) {
+static bool parse_variant_index(const char *text, size_t *out_index) {
+    if (!text || !out_index) return false;
+    if (text[0] == '\0') {
+        *out_index = 0;
+        return true;
+    }
+    for (const char *p = text; *p; ++p) {
+        if (!isdigit((unsigned char)*p)) {
+            return false;
+        }
+    }
+    *out_index = (size_t)strtoul(text, NULL, 10);
+    return true;
+}
+
+static SampleRef resolve_sample(const char *token, const SampleRegistry *default_registry, const SampleRegistry *user_registry) {
+    SampleRef ref = {0};
+    ref.valid = false;
+    if (!token) return ref;
+    bool has_registry = (default_registry != NULL) || (user_registry != NULL);
+
+    char token_copy[TOKEN_BUFFER_LEN];
+    strncpy(token_copy, token, sizeof(token_copy) - 1);
+    token_copy[sizeof(token_copy) - 1] = '\0';
+
+    char *variant_sep = strchr(token_copy, ':');
+    size_t variant_index = 0;
+    if (variant_sep) {
+        *variant_sep = '\0';
+        if (!parse_variant_index(variant_sep + 1, &variant_index)) {
+            fprintf(stderr, "Warning: invalid variant index '%s' for sound '%s' (treated as rest)\n", variant_sep + 1, token_copy);
+            return ref;
+        }
+    }
+
+    const SampleSound *sound = NULL;
+    const SampleRegistry *registry = NULL;
+    if (user_registry) {
+        sound = sample_registry_find_sound(user_registry, token_copy);
+        registry = user_registry;
+    }
+    if (!sound && default_registry) {
+        sound = sample_registry_find_sound(default_registry, token_copy);
+        registry = default_registry;
+    }
+
+    if (!sound || sound->variant_count == 0 || !has_registry) {
+        fprintf(stderr, "Unknown sound '%s' (treated as rest)\n", token_copy);
+        return ref;
+    }
+
+    if (sound->variant_count > 0) {
+        if (variant_index >= sound->variant_count) {
+            variant_index = variant_index % sound->variant_count;
+        }
+    }
+
+    ref.registry = registry;
+    ref.sound = sound;
+    ref.variant_index = variant_index;
+    ref.valid = true;
+    return ref;
+}
+
+bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *default_registry, const SampleRegistry *user_registry, Pattern *out_pattern) {
     if (!out_pattern) return false;
     memset(out_pattern, 0, sizeof(*out_pattern));
     bool truncated_token_seen = false;
@@ -45,11 +104,9 @@ bool pattern_from_lines(char **lines, size_t line_count, Pattern *out_pattern) {
             }
             memcpy(token, line + start, copy_len);
             token[copy_len] = '\0';
-            int sample = map_token_to_sample(token);
-            if (sample < 0) {
-                fprintf(stderr, "Warning: unknown token '%s' treated as rest\n", token);
-            }
-            add_step(out_pattern, sample, 1.0);
+            SampleRef ref = resolve_sample(token, default_registry, user_registry);
+            int sample_id = ref.valid ? 0 : -1;
+            add_step(out_pattern, &ref, sample_id, 1.0);
         }
     }
 

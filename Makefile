@@ -6,9 +6,9 @@ OBJ=$(SRC:.c=.o)
 UNAME_S := $(shell uname -s)
 LIBS = -lm
 ifeq ($(UNAME_S),Linux)
-LIBS += -ldl
+LIBS += -ldl -lcurl
 else ifeq ($(UNAME_S),Darwin)
-LIBS += -framework AudioToolbox -framework AudioUnit -framework CoreAudio
+LIBS += -framework AudioToolbox -framework AudioUnit -framework CoreAudio -lcurl
 endif
 
 musika: $(OBJ)

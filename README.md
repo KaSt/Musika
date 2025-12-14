@@ -49,11 +49,19 @@ Commands inside the REPL:
 Write patterns such as `kick kick kick kick` to place quarter notes at the configured tempo. The transport schedules 200ms
 windows ahead of the audio callback so tempo-stable playback continues while you edit.
 
+Pattern resolution:
+
+- Musika resolves sounds from the user registry first, then the default registry. Unknown sounds print a warning
+  ("Unknown sound '<name>' (treated as rest)") and are treated as rests.
+- Use `sound:variant` to pick a specific variant; non-numeric indexes are rejected with a warning. Variant indexes wrap
+  modulo the available variants for a sound.
+
 ## Configuring samples
 
 The default `config.json` lists a few public repositories that host drum and synth samples from the Strudel/TidalCycles community.
 The built-in kick is generated locally via `./scripts/fetch_kick.sh` to avoid storing binaries in the repository. Remote packs are
-optional; the core experience runs entirely offline once the kick file exists.
+optional; the core experience runs entirely offline once the kick file exists. Musika currently requires `libcurl` for loading
+remote sample maps.
 
 ## Keeping the repository binary-free
 

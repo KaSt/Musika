@@ -22,8 +22,8 @@ static void print_help(void) {
     printf("Commands:\n");
     printf("  :help           Show this help text.\n");
     printf("  :config         Display resolved configuration.\n");
-    printf("  :samples        Load a Strudel sample map into the user registry.\n");
-    printf("  :list-sounds    Show sounds from default and user registries.\n");
+    printf("  :samples <src>  Load a Strudel sample map into the user registry.\n");
+    printf("  :list-sounds [scope] Show sounds from default and user registries.\n");
     printf("  :edit           Open the inline text editor to craft a pattern.\n");
     printf("  :eval           Evaluate the current buffer into the live transport.\n");
     printf("  :play           Start playback of the active pattern.\n");
@@ -34,6 +34,8 @@ static void print_help(void) {
     printf("Pattern hints:\n");
     printf("  Use a space-separated sequence of sample names: kick kick\n");
     printf("  Alias 'bd' also triggers the generated kick sample.\n");
+    printf("  Use sound:variant to pick a specific variant (wraps if out of range).\n");
+    printf("  :list-sounds [default|user|all] controls which registry is shown.\n");
 }
 
 static void show_config(const MusikaConfig *config) {
@@ -134,7 +136,9 @@ static void run_loop(MusikaConfig *config, SampleRegistry *default_registry, Sam
                 char cache_path[512];
                 char error[256];
                 bool from_cache = false;
-                if (sample_registry_load_from_source(user_registry, arg, "user", refresh, cache_path, sizeof(cache_path), &from_cache, error, sizeof(error))) {
+                char resolved_url[512];
+                if (sample_registry_load_from_source(user_registry, arg, "user", refresh, cache_path, sizeof(cache_path), &from_cache, resolved_url, sizeof(resolved_url), error, sizeof(error))) {
+                    printf("Resolved to: %s\n", resolved_url);
                     if (refresh || !from_cache) {
                         printf("Fetched and cached: %s\n", cache_path);
                     } else if (from_cache) {
@@ -156,7 +160,7 @@ static void run_loop(MusikaConfig *config, SampleRegistry *default_registry, Sam
                 printf("Buffer is empty. Use :edit to add a pattern.\n");
                 continue;
             }
-            if (pattern_from_lines(buffer.lines, buffer.length, &pattern)) {
+            if (pattern_from_lines(buffer.lines, buffer.length, default_registry, user_registry, &pattern)) {
                 transport_set_pattern(&transport, &pattern);
                 printf("Pattern loaded into transport. Use :play to hear it.\n");
             } else {
@@ -233,10 +237,12 @@ int main(int argc, char **argv) {
     if (user_source) {
         char cache_path[512];
         char error[256];
+        char resolved_url[512];
         bool from_cache = false;
-        if (!sample_registry_load_from_source(&user_registry, user_source, "user", refresh_samples, cache_path, sizeof(cache_path), &from_cache, error, sizeof(error))) {
+        if (!sample_registry_load_from_source(&user_registry, user_source, "user", refresh_samples, cache_path, sizeof(cache_path), &from_cache, resolved_url, sizeof(resolved_url), error, sizeof(error))) {
             fprintf(stderr, "Failed to load user samples: %s\n", error[0] ? error : "unknown error");
         } else {
+            printf("Resolved to: %s\n", resolved_url);
             if (refresh_samples || !from_cache) {
                 printf("Fetched and cached: %s\n", cache_path);
             } else if (from_cache) {

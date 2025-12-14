@@ -497,7 +497,7 @@ static bool file_exists(const char *path) {
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-bool sample_registry_load_from_source(SampleRegistry *registry, const char *source, const char *name, bool refresh, char *cache_path, size_t cache_path_len, bool *out_cached, char *error, size_t error_len) {
+bool sample_registry_load_from_source(SampleRegistry *registry, const char *source, const char *name, bool refresh, char *cache_path, size_t cache_path_len, bool *out_cached, char *resolved_url, size_t resolved_url_len, char *error, size_t error_len) {
     if (out_cached) *out_cached = false;
     if (error && error_len > 0) error[0] = '\0';
     if (!registry || !source) return false;
@@ -505,6 +505,10 @@ bool sample_registry_load_from_source(SampleRegistry *registry, const char *sour
     if (!resolve_source_url(source, url, sizeof(url))) {
         if (error) snprintf(error, error_len, "Unrecognized source '%s'", source);
         return false;
+    }
+
+    if (resolved_url && resolved_url_len > 0) {
+        snprintf(resolved_url, resolved_url_len, "%s", url);
     }
 
     char resolved_cache_path[512];
