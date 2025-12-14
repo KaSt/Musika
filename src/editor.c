@@ -54,5 +54,5 @@ void launch_editor(TextBuffer *buffer) {
         buffer->length += 1;
     }
 
-    printf("Buffer captured %zu lines. Use :run to play.\n", buffer->length);
+    printf("Buffer captured %zu lines. Use :eval then :play to hear it.\n", buffer->length);
 }
