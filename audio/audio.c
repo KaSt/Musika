@@ -42,7 +42,7 @@ static void audio_callback(ma_device *device, void *output, const void *input, m
                 ActiveVoice *voice = &engine->voices[engine->voice_count++];
                 voice->sample = ev->sample;
                 voice->start_frame = ev->start_frame;
-                voice->position = 0;
+                voice->playback_rate = (ev->playback_rate > 0.0) ? ev->playback_rate : 1.0;
             }
 
             tail = next_index(tail);
@@ -57,22 +57,22 @@ static void audio_callback(ma_device *device, void *output, const void *input, m
                 continue;
             }
 
-            uint64_t offset = 0;
-            if (global_frame >= voice->start_frame) {
-                offset = global_frame - voice->start_frame;
-            } else {
+            if (global_frame < voice->start_frame) {
                 ++v;
                 continue;
             }
 
-            if (offset >= voice->sample->frame_count) {
+            double offset = ((double)(global_frame - voice->start_frame)) * voice->playback_rate;
+            uint64_t offset_i = (uint64_t)offset;
+
+            if (offset_i >= voice->sample->frame_count) {
                 engine->voices[v] = engine->voices[--engine->voice_count];
                 continue;
             }
 
             for (uint32_t ch = 0; ch < channels; ++ch) {
                 uint32_t sample_ch = ch % voice->sample->channels;
-                float s = voice->sample->data[offset * voice->sample->channels + sample_ch];
+                float s = voice->sample->data[offset_i * voice->sample->channels + sample_ch];
                 out[frame * channels + ch] += s;
             }
             ++v;
@@ -121,6 +121,10 @@ void audio_engine_shutdown(AudioEngine *engine) {
 }
 
 bool audio_engine_queue(AudioEngine *engine, const AudioSample *sample, uint64_t start_frame) {
+    return audio_engine_queue_rate(engine, sample, start_frame, 1.0);
+}
+
+bool audio_engine_queue_rate(AudioEngine *engine, const AudioSample *sample, uint64_t start_frame, double playback_rate) {
     size_t head = atomic_load(&engine->event_head);
     size_t next = next_index(head);
     size_t tail = atomic_load(&engine->event_tail);
@@ -129,6 +133,7 @@ bool audio_engine_queue(AudioEngine *engine, const AudioSample *sample, uint64_t
     }
     engine->event_queue[head].sample = sample;
     engine->event_queue[head].start_frame = start_frame;
+    engine->event_queue[head].playback_rate = (playback_rate > 0.0) ? playback_rate : 1.0;
     atomic_store(&engine->event_head, next);
     return true;
 }

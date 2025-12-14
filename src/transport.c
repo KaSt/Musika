@@ -26,7 +26,7 @@ static bool build_variant_url(const SampleRef *ref, char *out, size_t out_len) {
     const char *variant = ref->sound->variants ? ref->sound->variants[ref->variant_index] : NULL;
     if (!variant || variant[0] == '\0') return false;
 
-    if (strncmp(variant, "http://", 7) == 0 || strncmp(variant, "https://", 8) == 0) {
+    if (strncmp(variant, "http://", 7) == 0 || strncmp(variant, "https://", 8) == 0 || strncmp(variant, "file://", 7) == 0 || variant[0] == '/' || variant[0] == '.') {
         return snprintf(out, out_len, "%s", variant) < (int)out_len;
     }
 
@@ -41,6 +41,35 @@ static bool build_variant_url(const SampleRef *ref, char *out, size_t out_len) {
     }
 
     return snprintf(out, out_len, "%s", variant) < (int)out_len;
+}
+
+static bool is_remote_url(const char *url) {
+    return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
+}
+
+static const AudioSample *load_builtin_tone(Transport *t) {
+    if (!t) return NULL;
+    const char *key = "builtin:tone";
+    for (size_t i = 0; i < t->sample_cache_count; ++i) {
+        if (t->sample_cache[i].loaded && strcmp(t->sample_cache[i].key, key) == 0) {
+            return &t->sample_cache[i].sample;
+        }
+    }
+
+    if (t->sample_cache_count >= sizeof(t->sample_cache) / sizeof(t->sample_cache[0])) {
+        return NULL;
+    }
+
+    AudioSample sample;
+    if (!audio_sample_generate_sine(&sample, 1.5, t->audio ? t->audio->sample_rate : 48000, 440.0)) {
+        return NULL;
+    }
+
+    size_t slot = t->sample_cache_count++;
+    t->sample_cache[slot].loaded = true;
+    snprintf(t->sample_cache[slot].key, sizeof(t->sample_cache[slot].key), "%s", key);
+    t->sample_cache[slot].sample = sample;
+    return &t->sample_cache[slot].sample;
 }
 
 static bool ensure_cached_sample(const char *url, char *out_path, size_t out_len) {
@@ -59,6 +88,11 @@ static bool ensure_cached_sample(const char *url, char *out_path, size_t out_len
 static const AudioSample *load_sample_for_ref(Transport *t, const SampleRef *ref) {
     if (!t || !ref || !ref->valid) return NULL;
     if (!ref->sound || ref->variant_index >= ref->sound->variant_count) return NULL;
+
+    if (ref->sound->name && strcmp(ref->sound->name, "tone") == 0) {
+        const AudioSample *tone = load_builtin_tone(t);
+        if (tone) return tone;
+    }
 
     const char *registry_name = (ref->registry && ref->registry->name) ? ref->registry->name : "default";
     char cache_key[256];
@@ -82,8 +116,15 @@ static const AudioSample *load_sample_for_ref(Transport *t, const SampleRef *ref
     }
 
     char path[512];
-    if (!ensure_cached_sample(url, path, sizeof(path))) {
-        return (t->sample_count > 0) ? &t->samples[0] : NULL;
+    bool remote = is_remote_url(url);
+    if (remote) {
+        if (!ensure_cached_sample(url, path, sizeof(path))) {
+            return (t->sample_count > 0) ? &t->samples[0] : NULL;
+        }
+    } else {
+        if (snprintf(path, sizeof(path), "%s", url) >= (int)sizeof(path) || !file_exists(path)) {
+            return (t->sample_count > 0) ? &t->samples[0] : NULL;
+        }
     }
 
     AudioSample sample;
@@ -135,7 +176,7 @@ static void *transport_thread(void *user) {
                 const AudioSample *sample = load_sample_for_ref(t, &step->sample);
                 if (sample) {
                     uint64_t start_frame = (uint64_t)(t->next_event_time * (double)t->audio->sample_rate);
-                    audio_engine_queue(t->audio, sample, start_frame);
+                    audio_engine_queue_rate(t->audio, sample, start_frame, step->playback_rate > 0.0 ? step->playback_rate : 1.0);
                 }
             }
             t->next_event_time += step->duration_beats * t->seconds_per_beat;
