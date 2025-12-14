@@ -39,12 +39,90 @@ static const char *embedded_default_map =
     "  ]\n"
     "}\n";
 
+static int semitone_for_letter(char c) {
+    switch (tolower((unsigned char)c)) {
+        case 'c': return 0;
+        case 'd': return 2;
+        case 'e': return 4;
+        case 'f': return 5;
+        case 'g': return 7;
+        case 'a': return 9;
+        case 'b': return 11;
+        default: return -1;
+    }
+}
+
+static bool midi_from_note_name(const char *text, int *out_midi) {
+    if (!text || !out_midi || text[0] == '\0') return false;
+    int base = semitone_for_letter(text[0]);
+    if (base < 0) return false;
+
+    size_t idx = 1;
+    int accidental = 0;
+    char accidental_char = text[idx];
+    if (accidental_char == '#' || tolower((unsigned char)accidental_char) == 'b') {
+        accidental = (accidental_char == '#') ? 1 : -1;
+        idx++;
+    }
+
+    if (!isdigit((unsigned char)text[idx])) {
+        return false;
+    }
+
+    char *end = NULL;
+    long octave = strtol(&text[idx], &end, 10);
+    if (end == &text[idx] || (*end != '\0' && !isspace((unsigned char)*end))) {
+        return false;
+    }
+
+    int midi = (int)((octave + 1) * 12 + base + accidental);
+    if (midi < 0) midi = 0;
+    if (midi > 127) midi = 127;
+    *out_midi = midi;
+    return true;
+}
+
 static char *dup_range(const char *start, size_t len) {
     char *out = malloc(len + 1);
     if (!out) return NULL;
     memcpy(out, start, len);
     out[len] = '\0';
     return out;
+}
+
+static bool append_pitched_entry(SampleSound *sound, const char *key, const char *variant) {
+    if (!sound || !key || !variant) return false;
+    char **next_keys = realloc(sound->pitched_keys, sizeof(char *) * (sound->pitched_entry_count + 1));
+    int *next_midi = realloc(sound->pitched_midi, sizeof(int) * (sound->pitched_entry_count + 1));
+    char **next_variants = realloc(sound->pitched_variants, sizeof(char *) * (sound->pitched_entry_count + 1));
+    if (!next_keys || !next_midi || !next_variants) {
+        free(next_keys);
+        free(next_midi);
+        free(next_variants);
+        return false;
+    }
+    sound->pitched_keys = next_keys;
+    sound->pitched_midi = next_midi;
+    sound->pitched_variants = next_variants;
+    sound->pitched_keys[sound->pitched_entry_count] = dup_range(key, strlen(key));
+    if (!sound->pitched_keys[sound->pitched_entry_count]) return false;
+    int midi = 0;
+    if (!midi_from_note_name(key, &midi)) {
+        fprintf(stderr, "Warning: ignoring pitched sample entry with unrecognized key '%s'\n", key);
+        free(sound->pitched_keys[sound->pitched_entry_count]);
+        sound->pitched_keys[sound->pitched_entry_count] = NULL;
+        return false;
+    }
+    sound->pitched_midi[sound->pitched_entry_count] = midi;
+    sound->pitched_variants[sound->pitched_entry_count] = dup_range(variant, strlen(variant));
+    if (!sound->pitched_variants[sound->pitched_entry_count]) {
+        free(sound->pitched_keys[sound->pitched_entry_count]);
+        sound->pitched_keys[sound->pitched_entry_count] = NULL;
+        return false;
+    }
+    sound->pitched_entry_count += 1;
+    sound->variant_count = sound->pitched_entry_count;
+    return true;
 }
 
 static char *load_file(const char *path, size_t *out_len) {
@@ -112,41 +190,68 @@ static bool append_variant(SampleSound *sound, const char *value, size_t len) {
     return true;
 }
 
-static size_t count_top_level_object_entries(const char *json) {
-    if (!json || json[0] != '{') return 0;
-    size_t count = 0;
-    int depth = 0;
-    bool in_string = false;
-    bool escape = false;
-    for (const char *s = json; *s; ++s) {
-        char c = *s;
-        if (escape) {
-            escape = false;
+static bool parse_pitched_map_json(const char *json, SampleSound *sound) {
+    const char *p = skip_ws(json);
+    if (!p || *p != '{' || !sound) return false;
+    p++;
+    while (p && *p) {
+        p = skip_ws(p);
+        if (*p == '}') {
+            return sound->pitched_entry_count > 0;
+        }
+        char *key = parse_string(&p);
+        if (!key) return false;
+        p = skip_ws(p);
+        if (*p != ':') {
+            free(key);
+            return false;
+        }
+        p++;
+        p = skip_ws(p);
+
+        char *variant = NULL;
+        if (*p == '"') {
+            variant = parse_string(&p);
+        } else if (*p == '[') {
+            p++;
+            while (*p && *p != ']') {
+                char *candidate = parse_string(&p);
+                if (candidate && !variant) {
+                    variant = candidate;
+                } else if (candidate) {
+                    free(candidate);
+                }
+                p = skip_ws(p);
+                if (*p == ',') {
+                    p++;
+                    continue;
+                }
+                if (*p == ']') {
+                    break;
+                }
+                break;
+            }
+            if (*p == ']') {
+                p++;
+            }
+        }
+
+        bool ok = variant != NULL && append_pitched_entry(sound, key, variant);
+        free(key);
+        free(variant);
+        if (!ok) return false;
+
+        p = skip_ws(p);
+        if (*p == ',') {
+            p++;
             continue;
         }
-        if (c == '\\') {
-            escape = true;
-            continue;
+        if (*p == '}') {
+            return true;
         }
-        if (c == '"') {
-            in_string = !in_string;
-            continue;
-        }
-        if (in_string) continue;
-        if (c == '{') {
-            depth++;
-            continue;
-        }
-        if (c == '}') {
-            depth--;
-            if (depth <= 0) break;
-            continue;
-        }
-        if (depth == 1 && c == ':') {
-            count++;
-        }
+        return false;
     }
-    return count;
+    return sound->pitched_entry_count > 0;
 }
 
 static char *extract_object_json(const char **p) {
@@ -241,8 +346,11 @@ static bool parse_value(const char **p, SampleSound *sound) {
         char *object_json = extract_object_json(&s);
         if (!object_json) return false;
         sound->pitched_map_json = object_json;
-        sound->pitched_entry_count = count_top_level_object_entries(object_json);
-        sound->variant_count = sound->pitched_entry_count;
+        sound->pitched_entry_count = 0;
+        sound->variant_count = 0;
+        if (!parse_pitched_map_json(object_json, sound)) {
+            return false;
+        }
         *p = s;
         return true;
     }
@@ -337,6 +445,16 @@ static bool validate_registry(const SampleRegistry *registry) {
                 }
             }
         }
+        if (sound->pitched_map_json) {
+            if (sound->pitched_entry_count == 0 || !sound->pitched_keys || !sound->pitched_variants || !sound->pitched_midi) {
+                return false;
+            }
+            for (size_t v = 0; v < sound->pitched_entry_count; ++v) {
+                if (!sound->pitched_keys[v] || !sound->pitched_variants[v]) {
+                    return false;
+                }
+            }
+        }
     }
     return true;
 }
@@ -345,6 +463,15 @@ static void free_sound(SampleSound *sound) {
     if (!sound) return;
     free(sound->name);
     free(sound->pitched_map_json);
+    if (sound->pitched_keys) {
+        for (size_t i = 0; i < sound->pitched_entry_count; ++i) {
+            free(sound->pitched_keys[i]);
+            free(sound->pitched_variants ? sound->pitched_variants[i] : NULL);
+        }
+    }
+    free(sound->pitched_keys);
+    free(sound->pitched_midi);
+    free(sound->pitched_variants);
     if (sound->variants) {
         for (size_t i = 0; i < sound->variant_count; ++i) {
             free(sound->variants[i]);

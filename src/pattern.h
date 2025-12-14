@@ -17,6 +17,8 @@ typedef struct {
     SampleRef sample;
     double duration_beats;
     double playback_rate;
+    int midi_note;
+    bool has_midi_note;
 } PatternStep;
 
 typedef struct {

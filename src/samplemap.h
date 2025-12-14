@@ -11,6 +11,9 @@ typedef struct {
     size_t variant_count;
     char *pitched_map_json;
     size_t pitched_entry_count;
+    char **pitched_keys;
+    int *pitched_midi;
+    char **pitched_variants;
 } SampleSound;
 
 typedef struct {

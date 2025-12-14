@@ -19,13 +19,13 @@ typedef enum {
 typedef struct {
     double duration_beats;
     double playback_rate;
+    int midi_note;
+    bool has_midi_note;
 } NoteStep;
 
-static void add_step(Pattern *pattern, const SampleRef *sample, double duration, double playback_rate) {
+static void add_step(Pattern *pattern, const PatternStep *step) {
     if (pattern->step_count >= sizeof(pattern->steps) / sizeof(pattern->steps[0])) return;
-    pattern->steps[pattern->step_count].sample = *sample;
-    pattern->steps[pattern->step_count].duration_beats = duration;
-    pattern->steps[pattern->step_count].playback_rate = playback_rate;
+    pattern->steps[pattern->step_count] = *step;
     pattern->step_count += 1;
 }
 
@@ -40,6 +40,25 @@ static int semitone_for_letter(char c) {
         case 'b': return 11;
         default: return -1;
     }
+}
+
+static bool pick_pitched_variant(const SampleSound *sound, int midi_note, size_t *variant_index, int *base_midi) {
+    if (!sound || sound->pitched_entry_count == 0 || !sound->pitched_midi) return false;
+    size_t best_idx = 0;
+    int best_midi = sound->pitched_midi[0];
+    int best_diff = abs(midi_note - best_midi);
+    for (size_t i = 1; i < sound->pitched_entry_count; ++i) {
+        int midi = sound->pitched_midi[i];
+        int diff = abs(midi_note - midi);
+        if (diff < best_diff) {
+            best_diff = diff;
+            best_idx = i;
+            best_midi = midi;
+        }
+    }
+    if (variant_index) *variant_index = best_idx;
+    if (base_midi) *base_midi = best_midi;
+    return true;
 }
 
 static double parse_duration_beats(const char *text) {
@@ -67,51 +86,97 @@ static NoteParseResult parse_note_token(const char *token, NoteStep *out_step) {
         duration_part += 1;
     }
 
-    int base = semitone_for_letter(token_copy[0]);
-    if (base < 0) {
-        return NOTE_PARSE_NONE;
-    }
-
-    size_t idx = 1;
-    int accidental = 0;
-    char accidental_char = token_copy[idx];
-    if (accidental_char == '#' || tolower((unsigned char)accidental_char) == 'b') {
-        accidental = (accidental_char == '#') ? 1 : -1;
-        idx++;
-    }
-
-    if (!isdigit((unsigned char)token_copy[idx])) {
-        fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
-        out_step->duration_beats = parse_duration_beats(duration_part);
-        out_step->playback_rate = 1.0;
-        return NOTE_PARSE_REST;
-    }
-
-    char *end = NULL;
-    long octave = strtol(&token_copy[idx], &end, 10);
-    if (end == &token_copy[idx] || (*end != '\0' && !isspace((unsigned char)*end))) {
-        fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
-        out_step->duration_beats = parse_duration_beats(duration_part);
-        out_step->playback_rate = 1.0;
-        return NOTE_PARSE_REST;
-    }
-
+    int midi = -1;
+    bool parsed = false;
     bool clamped = false;
-    if (octave < 0) {
-        octave = 0;
-        clamped = true;
-    } else if (octave > 8) {
-        octave = 8;
-        clamped = true;
-    }
-    if (clamped) {
-        fprintf(stderr, "Warning: octave clamped to %ld for token '%s'\n", octave, token_copy);
-    }
 
-    int midi = (int)((octave + 1) * 12 + base + accidental);
-    double rate = pow(2.0, ((double)midi - (double)BASE_MIDI_TONE) / 12.0);
+    if (token_copy[0] == 'k' || token_copy[0] == 'K') {
+        char *end = NULL;
+        long key_num = strtol(token_copy + 1, &end, 10);
+        if (end == token_copy + 1 || (*end != '\0' && !isspace((unsigned char)*end))) {
+            fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
+        } else {
+            if (key_num < 1) {
+                key_num = 1;
+                clamped = true;
+            } else if (key_num > 88) {
+                key_num = 88;
+                clamped = true;
+            }
+            if (clamped) {
+                fprintf(stderr, "Warning: piano key clamped to %ld for token '%s'\n", key_num, token_copy);
+            }
+            midi = (int)(20 + key_num);
+            parsed = true;
+        }
+    } else if (isdigit((unsigned char)token_copy[0]) ||
+               ((token_copy[0] == '-' || token_copy[0] == '+') && isdigit((unsigned char)token_copy[1]))) {
+        char *end = NULL;
+        long midi_num = strtol(token_copy, &end, 10);
+        if (end == token_copy || (*end != '\0' && !isspace((unsigned char)*end))) {
+            fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
+        } else {
+            if (midi_num < 0) {
+                midi_num = 0;
+                clamped = true;
+            } else if (midi_num > 127) {
+                midi_num = 127;
+                clamped = true;
+            }
+            if (clamped) {
+                fprintf(stderr, "Warning: MIDI note clamped to %ld for token '%s'\n", midi_num, token_copy);
+            }
+            midi = (int)midi_num;
+            parsed = true;
+        }
+    } else {
+        int base = semitone_for_letter(token_copy[0]);
+        if (base < 0) {
+            return NOTE_PARSE_NONE;
+        }
+
+        size_t idx = 1;
+        int accidental = 0;
+        char accidental_char = token_copy[idx];
+        if (accidental_char == '#' || tolower((unsigned char)accidental_char) == 'b') {
+            accidental = (accidental_char == '#') ? 1 : -1;
+            idx++;
+        }
+
+        if (!isdigit((unsigned char)token_copy[idx])) {
+            fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
+        } else {
+            char *end = NULL;
+            long octave = strtol(&token_copy[idx], &end, 10);
+            if (end == &token_copy[idx] || (*end != '\0' && !isspace((unsigned char)*end))) {
+                fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
+            } else {
+                if (octave < 0) {
+                    octave = 0;
+                    clamped = true;
+                } else if (octave > 8) {
+                    octave = 8;
+                    clamped = true;
+                }
+                if (clamped) {
+                    fprintf(stderr, "Warning: octave clamped to %ld for token '%s'\n", octave, token_copy);
+                }
+
+                midi = (int)((octave + 1) * 12 + base + accidental);
+                parsed = true;
+            }
+        }
+    }
 
     out_step->duration_beats = parse_duration_beats(duration_part);
+    out_step->playback_rate = 1.0;
+    out_step->has_midi_note = parsed;
+    out_step->midi_note = midi;
+    if (!parsed) {
+        return NOTE_PARSE_REST;
+    }
+
+    double rate = pow(2.0, ((double)midi - (double)BASE_MIDI_TONE) / 12.0);
     out_step->playback_rate = rate;
     return NOTE_PARSE_OK;
 }
@@ -215,7 +280,12 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
             NoteStep note_step = {0};
             NoteParseResult note_result = parse_note_token(token, &note_step);
             if (note_result != NOTE_PARSE_NONE) {
-                SampleRef note_ref = {0};
+                PatternStep step = {0};
+                step.duration_beats = note_step.duration_beats;
+                step.playback_rate = note_step.playback_rate;
+                step.midi_note = note_step.midi_note;
+                step.has_midi_note = note_step.has_midi_note;
+
                 if (note_result == NOTE_PARSE_OK) {
                     if (!tone_checked) {
                         tone_ref = resolve_sample("tone", default_registry, user_registry);
@@ -225,15 +295,29 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
                         }
                     }
                     if (tone_ref.valid) {
-                        note_ref = tone_ref;
+                        step.sample = tone_ref;
+                        if (tone_ref.sound && tone_ref.sound->pitched_entry_count > 0 && note_step.has_midi_note) {
+                            size_t variant_index = tone_ref.variant_index;
+                            int base_midi = BASE_MIDI_TONE;
+                            if (pick_pitched_variant(tone_ref.sound, note_step.midi_note, &variant_index, &base_midi)) {
+                                step.sample.variant_index = variant_index;
+                                step.playback_rate = pow(2.0, ((double)note_step.midi_note - (double)base_midi) / 12.0);
+                            }
+                        }
                     }
                 }
-                add_step(out_pattern, &note_ref, note_step.duration_beats, note_step.playback_rate);
+                add_step(out_pattern, &step);
                 continue;
             }
 
             SampleRef ref = resolve_sample(token, default_registry, user_registry);
-            add_step(out_pattern, &ref, 1.0, 1.0);
+            PatternStep step = {0};
+            step.sample = ref;
+            step.duration_beats = 1.0;
+            step.playback_rate = 1.0;
+            step.has_midi_note = false;
+            step.midi_note = 0;
+            add_step(out_pattern, &step);
         }
     }
 
