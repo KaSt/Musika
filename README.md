@@ -54,10 +54,13 @@ windows ahead of the audio callback so tempo-stable playback continues while you
 Note tokens:
 
 - `c4`, `d#4`, `eb3` name pitches (case-insensitive) with octaves 0–8.
+- MIDI note numbers: `60`, `62/8`, `69/2`.
+- Piano key numbers: `k1`–`k88` (`k49` = A4/440 Hz, midi = key + 20). Out-of-range keys clamp with a warning.
 - Append `/len` for durations in beats relative to a quarter note: `c4/8` (eighth), `c4/2` (half). Missing `/len` defaults to `/4`.
 - Notes use the built-in `tone` sample (base A4/440 Hz) and set playback rate automatically. Unknown or out-of-range notes
   print a warning and become rests. The default sample map lists `tone` as `builtin:tone` to signal the generated sine; there
-  is no `assets/tone.wav` file.
+  is no `assets/tone.wav` file. If `tone` points to a pitched-map instrument (a JSON object of base-note samples), Musika picks
+  the closest base sample and adjusts playback rate relative to that base note.
 
 Pattern resolution:
 

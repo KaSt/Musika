@@ -21,9 +21,21 @@ static bool file_exists(const char *path) {
     return path && stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+static const char *variant_value_for_ref(const SampleRef *ref) {
+    if (!ref || !ref->sound) return NULL;
+    const SampleSound *sound = ref->sound;
+    if (sound->pitched_entry_count > 0 && sound->pitched_variants && ref->variant_index < sound->pitched_entry_count) {
+        return sound->pitched_variants[ref->variant_index];
+    }
+    if (sound->variant_count > 0 && sound->variants && ref->variant_index < sound->variant_count) {
+        return sound->variants[ref->variant_index];
+    }
+    return NULL;
+}
+
 static bool build_variant_url(const SampleRef *ref, char *out, size_t out_len) {
     if (!ref || !ref->sound || ref->variant_index >= ref->sound->variant_count || !out || out_len == 0) return false;
-    const char *variant = ref->sound->variants ? ref->sound->variants[ref->variant_index] : NULL;
+    const char *variant = variant_value_for_ref(ref);
     if (!variant || variant[0] == '\0') return false;
 
     if (strncmp(variant, "http://", 7) == 0 || strncmp(variant, "https://", 8) == 0 || strncmp(variant, "file://", 7) == 0 || variant[0] == '/' || variant[0] == '.') {
