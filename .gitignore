@@ -1,3 +1,4 @@
 musika
 *.o
-assets/
+assets/*
+!assets/default_samplemap.json
