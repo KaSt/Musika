@@ -56,6 +56,12 @@ Pattern resolution:
 - Use `sound:variant` to pick a specific variant; non-numeric indexes are rejected with a warning. Variant indexes wrap
   modulo the available variants for a sound.
 
+Manual verification (quick sanity checks):
+
+- Load a user pack and resolve variants: `:samples github:dxinteractive/strudel-samples@main` then evaluate `bd bd:3`.
+- Default variants from the built-in map: evaluate `bd bd:3 bd:7`.
+- Rest handling: evaluate `bd ~ bd` and confirm there is no warning for `~`.
+
 ## Configuring samples
 
 The default `config.json` lists a few public repositories that host drum and synth samples from the Strudel/TidalCycles community.
