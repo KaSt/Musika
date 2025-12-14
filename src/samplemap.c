@@ -90,8 +90,14 @@ static char *dup_range(const char *start, size_t len) {
     return out;
 }
 
-static bool append_pitched_entry(SampleSound *sound, const char *key, const char *variant) {
-    if (!sound || !key || !variant) return false;
+typedef enum {
+    APPEND_PITCHED_OK,
+    APPEND_PITCHED_SKIP,
+    APPEND_PITCHED_ERROR
+} AppendPitchedResult;
+
+static AppendPitchedResult append_pitched_entry(SampleSound *sound, const char *key, const char *variant) {
+    if (!sound || !key || !variant) return APPEND_PITCHED_ERROR;
     char **next_keys = realloc(sound->pitched_keys, sizeof(char *) * (sound->pitched_entry_count + 1));
     int *next_midi = realloc(sound->pitched_midi, sizeof(int) * (sound->pitched_entry_count + 1));
     char **next_variants = realloc(sound->pitched_variants, sizeof(char *) * (sound->pitched_entry_count + 1));
@@ -99,30 +105,30 @@ static bool append_pitched_entry(SampleSound *sound, const char *key, const char
         free(next_keys);
         free(next_midi);
         free(next_variants);
-        return false;
+        return APPEND_PITCHED_ERROR;
     }
     sound->pitched_keys = next_keys;
     sound->pitched_midi = next_midi;
     sound->pitched_variants = next_variants;
     sound->pitched_keys[sound->pitched_entry_count] = dup_range(key, strlen(key));
-    if (!sound->pitched_keys[sound->pitched_entry_count]) return false;
+    if (!sound->pitched_keys[sound->pitched_entry_count]) return APPEND_PITCHED_ERROR;
     int midi = 0;
     if (!midi_from_note_name(key, &midi)) {
         fprintf(stderr, "Warning: ignoring pitched sample entry with unrecognized key '%s'\n", key);
         free(sound->pitched_keys[sound->pitched_entry_count]);
         sound->pitched_keys[sound->pitched_entry_count] = NULL;
-        return false;
+        return APPEND_PITCHED_SKIP;
     }
     sound->pitched_midi[sound->pitched_entry_count] = midi;
     sound->pitched_variants[sound->pitched_entry_count] = dup_range(variant, strlen(variant));
     if (!sound->pitched_variants[sound->pitched_entry_count]) {
         free(sound->pitched_keys[sound->pitched_entry_count]);
         sound->pitched_keys[sound->pitched_entry_count] = NULL;
-        return false;
+        return APPEND_PITCHED_ERROR;
     }
     sound->pitched_entry_count += 1;
     sound->variant_count = sound->pitched_entry_count;
-    return true;
+    return APPEND_PITCHED_OK;
 }
 
 static char *load_file(const char *path, size_t *out_len) {
@@ -236,10 +242,22 @@ static bool parse_pitched_map_json(const char *json, SampleSound *sound) {
             }
         }
 
-        bool ok = variant != NULL && append_pitched_entry(sound, key, variant);
+        if (!variant) {
+            free(key);
+            return false;
+        }
+
+        size_t before_entries = sound->pitched_entry_count;
+        AppendPitchedResult append_result = append_pitched_entry(sound, key, variant);
         free(key);
         free(variant);
-        if (!ok) return false;
+
+        if (append_result == APPEND_PITCHED_ERROR) {
+            return false;
+        }
+        if (append_result == APPEND_PITCHED_SKIP && sound->pitched_entry_count == before_entries) {
+            // Skip invalid entry and continue parsing.
+        }
 
         p = skip_ws(p);
         if (*p == ',') {
@@ -247,7 +265,7 @@ static bool parse_pitched_map_json(const char *json, SampleSound *sound) {
             continue;
         }
         if (*p == '}') {
-            return true;
+            return sound->pitched_entry_count > 0;
         }
         return false;
     }
