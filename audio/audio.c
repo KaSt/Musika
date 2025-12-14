@@ -192,6 +192,13 @@ bool audio_sample_from_wav(const char *path, AudioSample *out_sample) {
         return false;
     }
 
+    const size_t max_wav_bytes = 50 * 1024 * 1024;
+    if (data_chunk_size > max_wav_bytes) {
+        fprintf(stderr, "WAV data chunk too large (%u bytes). Refusing to load.\n", data_chunk_size);
+        fclose(f);
+        return false;
+    }
+
     size_t frames = data_chunk_size / (channels * (bits_per_sample / 8));
     int16_t *pcm16 = (int16_t *)malloc(data_chunk_size);
     if (!pcm16) {
