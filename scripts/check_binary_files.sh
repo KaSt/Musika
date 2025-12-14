@@ -52,36 +52,36 @@ def check_working_tree():
 
 def check_history():
     try:
-        entries = subprocess.check_output(
-            ["git", "rev-list", "--objects", "--all"], text=True
-        ).splitlines()
-    except subprocess.CalledProcessError as exc:
-        print(f"Failed to walk history: {exc}", file=sys.stderr)
+        rev_proc = subprocess.Popen(
+            ["git", "rev-list", "--objects", "--all"], stdout=subprocess.PIPE, text=True
+        )
+    except OSError as exc:
+        print(f"Failed to launch rev-list: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    seen_hashes = set()
-    object_list = []
-    for line in entries:
-        parts = line.strip().split(maxsplit=1)
-        if not parts:
-            continue
-        obj_hash = parts[0]
-        path = parts[1] if len(parts) > 1 else obj_hash
-        if obj_hash in seen_hashes:
-            continue
-        seen_hashes.add(obj_hash)
-        object_list.append((obj_hash, path))
-
     suspicious = []
+    seen_hashes = set()
 
     try:
         with subprocess.Popen(
             ["git", "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         ) as proc:
             assert proc.stdin is not None and proc.stdout is not None
-            for obj_hash, path in object_list:
+
+            assert rev_proc.stdout is not None
+            for line in rev_proc.stdout:
+                parts = line.strip().split(maxsplit=1)
+                if not parts:
+                    continue
+                obj_hash = parts[0]
+                path = parts[1] if len(parts) > 1 else obj_hash
+                if obj_hash in seen_hashes:
+                    continue
+                seen_hashes.add(obj_hash)
+
                 proc.stdin.write(f"{obj_hash}\n".encode())
                 proc.stdin.flush()
+
                 header = proc.stdout.readline()
                 if not header:
                     suspicious.append((path, "unable to read object header"))
@@ -125,6 +125,10 @@ def check_history():
             proc.wait()
     except subprocess.CalledProcessError as exc:
         suspicious.append(("history", f"git cat-file failed: {exc}"))
+    finally:
+        if rev_proc.poll() is None:
+            rev_proc.terminate()
+        rev_proc.wait()
 
     return suspicious
 
