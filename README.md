@@ -51,7 +51,7 @@ Commands inside the REPL:
 Write patterns by first binding an instrument, then chaining notes and modifiers:
 
 ```
-@sample("bd").note("c4 c4 c4 c4")
+@sample("bd").note("x x x x")
 @sample("tone").note("<c4 e4 g4>/8")
 @sample("piano", bank="default").note("k49 k52 k56/2").postgain(0.7)
 ```
@@ -68,6 +68,8 @@ The transport still schedules ~200ms ahead of the audio callback so tempo-stable
 - MIDI note numbers: `60`, `62/8`, `69/2`.
 - Piano key numbers: `k1`–`k88` (`k49` = A4/440 Hz, midi = key + 20). Out-of-range keys clamp with a warning.
 - Grouped patterns such as `<c4 e4 g4>/8`, where the trailing duration applies to each grouped note.
+- Percussive hits: `x` (or `1`) for an unpitched trigger on the bound sample.
+- Rests: `~` yields silence for the given duration (defaults to `/4`).
 
 Durations use `/len` relative to a quarter note; missing `/len` defaults to `/4`. Notes always belong to the currently bound
 instrument. The `tone` sample stays available for melodic lines; if a sound exposes a pitched map, Musika snaps to the nearest
@@ -82,7 +84,7 @@ Manual verification (quick sanity checks):
 
 - Load a user pack and resolve variants: `:samples github:dxinteractive/strudel-samples@main` then evaluate `bd bd:3`.
 - Default variants from the built-in map: evaluate `bd bd:3 bd:7`.
-- Rest handling: evaluate `bd ~ bd` and confirm there is no warning for `~`.
+- Percussion hits and rests: evaluate `@sample("bd").note("x ~ x ~")` and confirm `~` stays silent while hits trigger.
 
 ## Configuring samples
 

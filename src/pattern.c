@@ -14,7 +14,13 @@ typedef enum {
     NOTE_PARSE_NONE,
     NOTE_PARSE_OK,
     NOTE_PARSE_REST,
+    NOTE_PARSE_HIT,
 } NoteParseResult;
+
+typedef struct {
+    char warned_names[8][32];
+    size_t warned_count;
+} ModifierWarningState;
 
 typedef struct {
     double duration_beats;
@@ -108,6 +114,23 @@ static bool copy_quoted_string(const char **p, char *out, size_t out_len, bool *
     return true;
 }
 
+static bool modifier_warned(const ModifierWarningState *state, const char *name) {
+    if (!state || !name) return false;
+    for (size_t i = 0; i < state->warned_count; ++i) {
+        if (equals_ci(state->warned_names[i], name)) return true;
+    }
+    return false;
+}
+
+static void record_modifier_warning(ModifierWarningState *state, const char *name) {
+    if (!state || !name || modifier_warned(state, name)) return;
+    if (state->warned_count < (sizeof(state->warned_names) / sizeof(state->warned_names[0]))) {
+        strncpy(state->warned_names[state->warned_count], name, sizeof(state->warned_names[0]) - 1);
+        state->warned_names[state->warned_count][sizeof(state->warned_names[0]) - 1] = '\0';
+        state->warned_count += 1;
+    }
+}
+
 static NoteParseResult parse_note_token(const char *token, NoteStep *out_step) {
     if (!token || !out_step) return NOTE_PARSE_NONE;
 
@@ -119,6 +142,22 @@ static NoteParseResult parse_note_token(const char *token, NoteStep *out_step) {
     if (duration_part) {
         *duration_part = '\0';
         duration_part += 1;
+    }
+
+    if ((token_copy[0] == 'x' || token_copy[0] == 'X' || token_copy[0] == '1') && token_copy[1] == '\0') {
+        out_step->duration_beats = parse_duration_beats(duration_part);
+        out_step->playback_rate = 1.0;
+        out_step->has_midi_note = false;
+        out_step->midi_note = 0;
+        return NOTE_PARSE_HIT;
+    }
+
+    if (token_copy[0] == '~' && token_copy[1] == '\0') {
+        out_step->duration_beats = parse_duration_beats(duration_part);
+        out_step->playback_rate = 1.0;
+        out_step->has_midi_note = false;
+        out_step->midi_note = 0;
+        return NOTE_PARSE_REST;
     }
 
     int midi = -1;
@@ -228,7 +267,7 @@ static void append_note_step(Pattern *pattern,
     step.midi_note = note_step->midi_note;
     step.has_midi_note = note_step->has_midi_note;
 
-    if (result == NOTE_PARSE_OK) {
+    if (result == NOTE_PARSE_OK || result == NOTE_PARSE_HIT) {
         if (sample && sample->valid) {
             step.sample = *sample;
             if (sample->sound && sample->sound->pitched_entry_count > 0 && note_step->has_midi_note) {
@@ -462,7 +501,8 @@ static void parse_modifier_chain(const char *text,
                                  const SampleRef *sample,
                                  Pattern *pattern,
                                  bool *truncated_token_seen,
-                                 bool *missing_sample_warned) {
+                                 bool *missing_sample_warned,
+                                 ModifierWarningState *modifier_warnings) {
     const char *p = text;
     while (p && *p) {
         p = skip_spaces(p);
@@ -515,7 +555,10 @@ static void parse_modifier_chain(const char *text,
                 parse_note_sequence(note_text, sample, pattern, truncated_token_seen, missing_sample_warned);
             }
         } else {
-            fprintf(stderr, "Warning: modifier '%s' is not implemented yet (ignored)\n", name);
+            if (!modifier_warned(modifier_warnings, name)) {
+                fprintf(stderr, "Warning: modifier '%s' is not implemented yet (ignored)\n", name);
+                record_modifier_warning(modifier_warnings, name);
+            }
         }
 
         p = after_paren;
@@ -662,6 +705,7 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
     bool deprecated_notes = false;
     SampleRef current_sample = {0};
     bool have_current_sample = false;
+    ModifierWarningState modifier_warnings = {0};
 
     for (size_t i = 0; i < line_count; ++i) {
         char *line = lines[i];
@@ -674,12 +718,12 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
         if (parse_sample_invocation(trimmed, default_registry, user_registry, &parsed_sample, &rest, &truncated_token_seen)) {
             current_sample = parsed_sample;
             have_current_sample = true;
-            parse_modifier_chain(rest, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned);
+            parse_modifier_chain(rest, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings);
             continue;
         }
 
         if (have_current_sample && trimmed[0] == '.') {
-            parse_modifier_chain(trimmed, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned);
+            parse_modifier_chain(trimmed, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings);
             continue;
         }
 
