@@ -1,2 +1,66 @@
 # Musika
-Music made code, or code made music
+
+Music made code, or code made music.
+
+Musika is a tiny terminal-first live coding playground inspired by TidalCycles and Strudel. It ships as a single C program that
+opens a real audio device (via an embedded miniaudio-compatible backend), plays a generated kick sample, and hot-reloads simple
+patterns while audio keeps running.
+
+## Features
+
+- Inline text editor inside the terminal to sketch multi-line patterns.
+- Minimal pattern language using space-separated tokens (`kick`, `bd`) that map to the generated kick sample.
+- Configurable tempo, audio backend name, and remote sample packs through `config.json` (audio runs locally, no downloads).
+- Continuous transport thread that schedules events in deterministic time slices for steady playback.
+
+## Building
+
+```bash
+make
+```
+
+This produces the `musika` binary. On Linux, the embedded backend dynamically loads ALSA (`libasound.so.2`) at runtime; on
+macOS it uses AudioQueue. No additional build-time dependencies are required.
+
+## Running
+
+Generate the kick sample (only needed once per checkout or after cleaning `assets/`):
+```bash
+./scripts/fetch_kick.sh
+```
+
+Audible beep test:
+```bash
+./musika --beep
+```
+
+Live coding loop:
+```bash
+./musika
+```
+
+Commands inside the REPL:
+- `:edit` – open the inline buffer (finish with a `.` line).
+- `:eval` – parse the buffer and arm it as the active pattern.
+- `:play` / `:stop` – start or pause transport without tearing down the audio device.
+- `:panic` – silence queued audio immediately.
+- `:help` – show the full list.
+
+Write patterns such as `kick kick kick kick` to place quarter notes at the configured tempo. The transport schedules 200ms
+windows ahead of the audio callback so tempo-stable playback continues while you edit.
+
+## Configuring samples
+
+The default `config.json` lists a few public repositories that host drum and synth samples from the Strudel/TidalCycles community.
+The built-in kick is generated locally via `./scripts/fetch_kick.sh` to avoid storing binaries in the repository. Remote packs are
+optional; the core experience runs entirely offline once the kick file exists.
+
+## Keeping the repository binary-free
+
+Generated audio assets live under `assets/` (ignored by Git). To verify the tree stays free of committed binaries, run:
+
+```
+./scripts/check_binary_files.sh
+```
+
+The helper scans tracked files and exits non-zero if it detects likely binary content so you can clean up before pushing updates.

@@ -1,0 +1,9 @@
+{
+  "audioBackend": "miniaudio",
+  "tempo": 120,
+  "sampleRepos": [
+    "https://github.com/tyleretters/strudel-samples",
+    "https://github.com/tidalcycles/Dirt-Samples",
+    "https://github.com/lukaprincic/strudel-sample-pack"
+  ]
+}
