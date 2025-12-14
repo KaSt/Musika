@@ -1,3 +1,5 @@
+#include <ctype.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +22,8 @@ static void print_help(void) {
     printf("Commands:\n");
     printf("  :help           Show this help text.\n");
     printf("  :config         Display resolved configuration.\n");
-    printf("  :samples        List sample packs from configuration.\n");
+    printf("  :samples        Load a Strudel sample map into the user registry.\n");
+    printf("  :list-sounds    Show sounds from default and user registries.\n");
     printf("  :edit           Open the inline text editor to craft a pattern.\n");
     printf("  :eval           Evaluate the current buffer into the live transport.\n");
     printf("  :play           Start playback of the active pattern.\n");
@@ -69,7 +72,15 @@ static int run_beep_mode(void) {
     return 0;
 }
 
-static void run_loop(MusikaConfig *config) {
+static void handle_list_sounds(const SampleRegistry *default_registry, const SampleRegistry *user_registry, const char *arg) {
+    const char *filter = NULL;
+    if (arg && arg[0] != '\0') {
+        filter = arg;
+    }
+    sample_registry_print_merged(default_registry, user_registry, filter, stdout);
+}
+
+static void run_loop(MusikaConfig *config, SampleRegistry *default_registry, SampleRegistry *user_registry) {
     TextBuffer buffer = text_buffer_new();
     char line[2048];
     AudioEngine engine;
@@ -108,10 +119,36 @@ static void run_loop(MusikaConfig *config) {
             print_help();
         } else if (strcmp(line, ":config") == 0) {
             show_config(config);
-        } else if (strcmp(line, ":samples") == 0) {
-            for (size_t i = 0; i < config->sample_repo_count; ++i) {
-                printf("[%zu] %s\n", i + 1, config->sample_repos[i]);
+        } else if (strncmp(line, ":samples", 8) == 0) {
+            char *arg = line + 8;
+            while (*arg && isspace((unsigned char)*arg)) arg++;
+            bool refresh = false;
+            if (strncmp(arg, "--refresh", 9) == 0) {
+                refresh = true;
+                arg += 9;
+                while (*arg && isspace((unsigned char)*arg)) arg++;
             }
+            if (*arg == '\0') {
+                printf("Usage: :samples [--refresh] <source>\n");
+            } else {
+                char cache_path[512];
+                char error[256];
+                bool from_cache = false;
+                if (sample_registry_load_from_source(user_registry, arg, "user", refresh, cache_path, sizeof(cache_path), &from_cache, error, sizeof(error))) {
+                    if (refresh || !from_cache) {
+                        printf("Fetched and cached: %s\n", cache_path);
+                    } else if (from_cache) {
+                        printf("Loaded from cache: %s\n", cache_path);
+                    }
+                    printf("Loaded %zu sounds into user registry from %s\n", user_registry->sound_count, arg);
+                } else {
+                    printf("Failed to load samples: %s\n", error[0] ? error : "unknown error");
+                }
+            }
+        } else if (strncmp(line, ":list-sounds", 12) == 0) {
+            char *arg = line + 12;
+            while (*arg && isspace((unsigned char)*arg)) arg++;
+            handle_list_sounds(default_registry, user_registry, *arg ? arg : "all");
         } else if (strcmp(line, ":edit") == 0) {
             launch_editor(&buffer);
         } else if (strcmp(line, ":eval") == 0) {
@@ -154,32 +191,72 @@ static void run_loop(MusikaConfig *config) {
 
 int main(int argc, char **argv) {
     MusikaConfig config;
-    SampleRegistry registry;
+    SampleRegistry default_registry;
+    SampleRegistry user_registry;
+    memset(&user_registry, 0, sizeof(user_registry));
     const char *config_path = "config.json";
     load_config(config_path, &config);
 
-    if (!sample_registry_load_default(&registry)) {
+    if (!sample_registry_load_default(&default_registry)) {
         fprintf(stderr, "Failed to load default sample map.\n");
         free_config(&config);
         return 1;
     }
 
-    if (argc > 1 && strcmp(argv[1], "--list-sounds") == 0) {
-        sample_registry_print(&registry, stdout);
-        sample_registry_free(&registry);
-        free_config(&config);
-        return 0;
+    bool list_sounds = false;
+    const char *list_filter = "all";
+    const char *user_source = NULL;
+    bool refresh_samples = false;
+    bool beep_mode = false;
+
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--list-sounds") == 0) {
+            list_sounds = true;
+        } else if (strcmp(argv[i], "--registry") == 0 && i + 1 < argc) {
+            list_filter = argv[++i];
+        } else if (strcmp(argv[i], "--samples") == 0 && i + 1 < argc) {
+            user_source = argv[++i];
+        } else if (strcmp(argv[i], "--refresh-samples") == 0) {
+            refresh_samples = true;
+        } else if (strcmp(argv[i], "--beep") == 0) {
+            beep_mode = true;
+        }
     }
 
-    if (argc > 1 && strcmp(argv[1], "--beep") == 0) {
+    if (beep_mode) {
         int rc = run_beep_mode();
-        sample_registry_free(&registry);
+        sample_registry_free(&default_registry);
         free_config(&config);
         return rc;
     }
 
-    run_loop(&config);
-    sample_registry_free(&registry);
+    if (user_source) {
+        char cache_path[512];
+        char error[256];
+        bool from_cache = false;
+        if (!sample_registry_load_from_source(&user_registry, user_source, "user", refresh_samples, cache_path, sizeof(cache_path), &from_cache, error, sizeof(error))) {
+            fprintf(stderr, "Failed to load user samples: %s\n", error[0] ? error : "unknown error");
+        } else {
+            if (refresh_samples || !from_cache) {
+                printf("Fetched and cached: %s\n", cache_path);
+            } else if (from_cache) {
+                printf("Loaded from cache: %s\n", cache_path);
+            }
+            printf("Loaded %zu sounds into user registry from %s\n", user_registry.sound_count, user_source);
+        }
+    }
+
+    if (list_sounds) {
+        sample_registry_print_merged(&default_registry, &user_registry, list_filter, stdout);
+        sample_registry_free(&user_registry);
+        sample_registry_free(&default_registry);
+        free_config(&config);
+        return 0;
+    }
+
+    run_loop(&config, &default_registry, &user_registry);
+    sample_registry_free(&user_registry);
+    sample_registry_free(&default_registry);
     free_config(&config);
     return 0;
 }

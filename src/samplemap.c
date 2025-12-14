@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+
+#include "cache.h"
+#include "http_fetch.h"
 
 static const char *embedded_default_map =
     "{\n"
@@ -105,6 +109,85 @@ static bool append_variant(SampleSound *sound, const char *value, size_t len) {
     return true;
 }
 
+static size_t count_top_level_object_entries(const char *json) {
+    if (!json || json[0] != '{') return 0;
+    size_t count = 0;
+    int depth = 0;
+    bool in_string = false;
+    bool escape = false;
+    for (const char *s = json; *s; ++s) {
+        char c = *s;
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        if (c == '\\') {
+            escape = true;
+            continue;
+        }
+        if (c == '"') {
+            in_string = !in_string;
+            continue;
+        }
+        if (in_string) continue;
+        if (c == '{') {
+            depth++;
+            continue;
+        }
+        if (c == '}') {
+            depth--;
+            if (depth <= 0) break;
+            continue;
+        }
+        if (depth == 1 && c == ':') {
+            count++;
+        }
+    }
+    return count;
+}
+
+static char *extract_object_json(const char **p) {
+    const char *s = skip_ws(*p);
+    if (!s || *s != '{') return NULL;
+    int depth = 0;
+    bool in_string = false;
+    bool escape = false;
+    const char *start = s;
+    while (*s) {
+        char c = *s;
+        if (escape) {
+            escape = false;
+            s++;
+            continue;
+        }
+        if (c == '\\') {
+            escape = true;
+            s++;
+            continue;
+        }
+        if (c == '"') {
+            in_string = !in_string;
+            s++;
+            continue;
+        }
+        if (!in_string) {
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    s++;
+                    char *json = dup_range(start, (size_t)(s - start));
+                    *p = s;
+                    return json;
+                }
+            }
+        }
+        s++;
+    }
+    return NULL;
+}
+
 static bool parse_value(const char **p, SampleSound *sound) {
     const char *s = skip_ws(*p);
     if (!s) return false;
@@ -151,6 +234,15 @@ static bool parse_value(const char **p, SampleSound *sound) {
             return sound->variant_count > 0;
         }
     }
+    if (*s == '{') {
+        char *object_json = extract_object_json(&s);
+        if (!object_json) return false;
+        sound->pitched_map_json = object_json;
+        sound->pitched_entry_count = count_top_level_object_entries(object_json);
+        sound->variant_count = sound->pitched_entry_count;
+        *p = s;
+        return true;
+    }
     return false;
 }
 
@@ -160,9 +252,8 @@ static bool append_sound(SampleRegistry *registry, const char *name, size_t len,
     if (!next) return false;
     registry->sounds = next;
     SampleSound *sound = &registry->sounds[registry->sound_count];
+    memset(sound, 0, sizeof(*sound));
     sound->name = dup_range(name, len);
-    sound->variants = NULL;
-    sound->variant_count = 0;
     if (!sound->name) return false;
     registry->sound_count += 1;
     if (out) *out = sound;
@@ -230,12 +321,17 @@ static bool validate_registry(const SampleRegistry *registry) {
     }
     for (size_t i = 0; i < registry->sound_count; ++i) {
         const SampleSound *sound = &registry->sounds[i];
-        if (!sound->name || sound->name[0] == '\0' || sound->variant_count == 0 || !sound->variants) {
+        if (!sound->name || sound->name[0] == '\0') {
             return false;
         }
-        for (size_t v = 0; v < sound->variant_count; ++v) {
-            if (!sound->variants[v] || sound->variants[v][0] == '\0') {
-                return false;
+        if (sound->variant_count == 0 && !sound->pitched_map_json) {
+            return false;
+        }
+        if (sound->variants) {
+            for (size_t v = 0; v < sound->variant_count; ++v) {
+                if (!sound->variants[v] || sound->variants[v][0] == '\0') {
+                    return false;
+                }
             }
         }
     }
@@ -245,6 +341,7 @@ static bool validate_registry(const SampleRegistry *registry) {
 static void free_sound(SampleSound *sound) {
     if (!sound) return;
     free(sound->name);
+    free(sound->pitched_map_json);
     if (sound->variants) {
         for (size_t i = 0; i < sound->variant_count; ++i) {
             free(sound->variants[i]);
@@ -304,6 +401,159 @@ void sample_registry_print(const SampleRegistry *registry, FILE *out) {
     fprintf(out, "Registry: %s\n", registry->name ? registry->name : "(unknown)");
     for (size_t i = 0; i < registry->sound_count; ++i) {
         const SampleSound *sound = &registry->sounds[i];
-        fprintf(out, "  %s(%zu)\n", sound->name ? sound->name : "(unnamed)", sound->variant_count);
+        size_t count = sound->variant_count > 0 ? sound->variant_count : (sound->pitched_map_json ? 1 : 0);
+        fprintf(out, "  %s(%zu)\n", sound->name ? sound->name : "(unnamed)", count);
     }
 }
+
+static const SampleSound *find_sound(const SampleRegistry *registry, const char *name) {
+    if (!registry || !name) return NULL;
+    for (size_t i = 0; i < registry->sound_count; ++i) {
+        if (registry->sounds[i].name && strcmp(registry->sounds[i].name, name) == 0) {
+            return &registry->sounds[i];
+        }
+    }
+    return NULL;
+}
+
+const SampleSound *sample_registry_find_sound(const SampleRegistry *registry, const char *name) {
+    return find_sound(registry, name);
+}
+
+void sample_registry_print_merged(const SampleRegistry *default_registry, const SampleRegistry *user_registry, const char *filter, FILE *out) {
+    if (!out) return;
+    bool show_default = true;
+    bool show_user = true;
+    if (filter && strcmp(filter, "default") == 0) {
+        show_user = false;
+    } else if (filter && strcmp(filter, "user") == 0) {
+        show_default = false;
+    }
+    if (show_user && user_registry && user_registry->sound_count > 0) {
+        for (size_t i = 0; i < user_registry->sound_count; ++i) {
+            const SampleSound *sound = &user_registry->sounds[i];
+            size_t count = sound->variant_count > 0 ? sound->variant_count : (sound->pitched_map_json ? 1 : 0);
+            fprintf(out, "[user] %s (%zu)\n", sound->name ? sound->name : "(unnamed)", count);
+        }
+    }
+    if (show_default && default_registry) {
+        for (size_t i = 0; i < default_registry->sound_count; ++i) {
+            const SampleSound *sound = &default_registry->sounds[i];
+            if (show_user && find_sound(user_registry, sound->name)) {
+                continue;
+            }
+            size_t count = sound->variant_count > 0 ? sound->variant_count : (sound->pitched_map_json ? 1 : 0);
+            fprintf(out, "[default] %s (%zu)\n", sound->name ? sound->name : "(unnamed)", count);
+        }
+    }
+}
+
+static bool registry_from_json(SampleRegistry *registry, const char *json, const char *name) {
+    if (!registry || !json) return false;
+    memset(registry, 0, sizeof(*registry));
+    registry->name = dup_range(name ? name : "user", strlen(name ? name : "user"));
+    if (!registry->name) return false;
+    bool ok = parse_object(json, registry) && validate_registry(registry);
+    if (!ok) {
+        sample_registry_free(registry);
+    }
+    return ok;
+}
+
+static bool resolve_github_url(const char *source, char *url, size_t url_len) {
+    const char *p = source + strlen("github:");
+    const char *slash = strchr(p, '/');
+    if (!slash) return false;
+    const char *repo = slash + 1;
+    const char *at = strchr(repo, '@');
+    const char *ref = "main";
+    size_t repo_len = at ? (size_t)(at - repo) : strlen(repo);
+    if (at) {
+        ref = at + 1;
+    }
+    size_t user_len = (size_t)(slash - p);
+    if (user_len == 0 || repo_len == 0) return false;
+    if (snprintf(url, url_len, "https://raw.githubusercontent.com/%.*s/%.*s/%s/strudel.json", (int)user_len, p, (int)repo_len, repo, ref) >= (int)url_len) {
+        return false;
+    }
+    return true;
+}
+
+static bool resolve_source_url(const char *source, char *url, size_t url_len) {
+    if (!source) return false;
+    if (strncmp(source, "github:", 7) == 0) {
+        return resolve_github_url(source, url, url_len);
+    }
+    if (strncmp(source, "http://", 7) == 0 || strncmp(source, "https://", 8) == 0) {
+        if (strlen(source) + 1 > url_len) return false;
+        memcpy(url, source, strlen(source) + 1);
+        return true;
+    }
+    return false;
+}
+
+static bool file_exists(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+bool sample_registry_load_from_source(SampleRegistry *registry, const char *source, const char *name, bool refresh, char *cache_path, size_t cache_path_len, bool *out_cached, char *error, size_t error_len) {
+    if (out_cached) *out_cached = false;
+    if (error && error_len > 0) error[0] = '\0';
+    if (!registry || !source) return false;
+    char url[512];
+    if (!resolve_source_url(source, url, sizeof(url))) {
+        if (error) snprintf(error, error_len, "Unrecognized source '%s'", source);
+        return false;
+    }
+
+    char resolved_cache_path[512];
+    if (!cache_path_for_key(source, resolved_cache_path, sizeof(resolved_cache_path))) {
+        if (error) snprintf(error, error_len, "Failed to resolve cache path");
+        return false;
+    }
+    if (cache_path && cache_path_len > 0) {
+        snprintf(cache_path, cache_path_len, "%s", resolved_cache_path);
+    }
+
+    char *json = NULL;
+    size_t len = 0;
+    bool loaded_from_cache = false;
+    if (!refresh && file_exists(resolved_cache_path)) {
+        json = load_file(resolved_cache_path, &len);
+        if (json) {
+            loaded_from_cache = true;
+        }
+    }
+
+    if (!json) {
+        if (!http_fetch_to_buffer(url, &json, &len)) {
+            if (error) snprintf(error, error_len, "Failed to fetch %s", url);
+            return false;
+        }
+        if (!cache_write(resolved_cache_path, json, len)) {
+            if (error) snprintf(error, error_len, "Failed to write cache file");
+            free(json);
+            return false;
+        }
+    }
+
+    SampleRegistry parsed;
+    bool ok = registry_from_json(&parsed, json, name ? name : "user");
+    free(json);
+    if (!ok) {
+        if (error) snprintf(error, error_len, "Malformed sample map");
+        return false;
+    }
+
+    if (registry->name || registry->sounds) {
+        sample_registry_free(registry);
+    }
+    *registry = parsed;
+    if (cache_path && cache_path_len > 0) {
+        snprintf(cache_path, cache_path_len, "%s", resolved_cache_path);
+    }
+    if (out_cached) *out_cached = loaded_from_cache;
+    return true;
+}
+
