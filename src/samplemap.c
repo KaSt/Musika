@@ -207,11 +207,18 @@ static bool parse_object(const char *json, SampleRegistry *registry) {
 }
 
 static bool validate_registry(const SampleRegistry *registry) {
-    if (!registry || registry->sound_count == 0) return false;
+    if (!registry || !registry->name || registry->name[0] == '\0' || registry->sound_count == 0) {
+        return false;
+    }
     for (size_t i = 0; i < registry->sound_count; ++i) {
         const SampleSound *sound = &registry->sounds[i];
-        if (!sound->name || sound->variant_count == 0 || !sound->variants) {
+        if (!sound->name || sound->name[0] == '\0' || sound->variant_count == 0 || !sound->variants) {
             return false;
+        }
+        for (size_t v = 0; v < sound->variant_count; ++v) {
+            if (!sound->variants[v] || sound->variants[v][0] == '\0') {
+                return false;
+            }
         }
     }
     return true;
