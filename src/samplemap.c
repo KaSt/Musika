@@ -7,7 +7,7 @@
 
 static const char *embedded_default_map =
     "{\n"
-    "  \"_base\": \"https://github.com/dxinteractive/strudel-samples/raw/main/\",\n"
+    "  \"_base\": \"https://cdn.jsdelivr.net/gh/dxinteractive/strudel-samples@main/\",\n"
     "  \"bd\": [\n"
     "    \"bd/boom.wav\",\n"
     "    \"bd/doom.wav\"\n"
