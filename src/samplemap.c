@@ -206,6 +206,17 @@ static bool parse_object(const char *json, SampleRegistry *registry) {
     return false;
 }
 
+static bool validate_registry(const SampleRegistry *registry) {
+    if (!registry || registry->sound_count == 0) return false;
+    for (size_t i = 0; i < registry->sound_count; ++i) {
+        const SampleSound *sound = &registry->sounds[i];
+        if (!sound->name || sound->variant_count == 0 || !sound->variants) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void free_sound(SampleSound *sound) {
     if (!sound) return;
     free(sound->name);
@@ -243,7 +254,7 @@ bool sample_registry_load_default(SampleRegistry *registry) {
     char *json = load_file("assets/default_samplemap.json", &len);
     bool ok = false;
     if (json && len > 0) {
-        ok = parse_object(json, registry);
+        ok = parse_object(json, registry) && validate_registry(registry);
     }
     if (!ok) {
         free(json);
@@ -253,7 +264,7 @@ bool sample_registry_load_default(SampleRegistry *registry) {
         if (!registry->name) return false;
         json = dup_range(embedded_default_map, strlen(embedded_default_map));
         if (!json) return false;
-        ok = parse_object(json, registry);
+        ok = parse_object(json, registry) && validate_registry(registry);
     }
 
     free(json);
