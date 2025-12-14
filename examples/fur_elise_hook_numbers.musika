@@ -1,1 +1,5 @@
-k56/8 k55/8 k56/8 k55/8 k56/8 k51/8 k54/8 k52/8 k49/2 ~ bd hh bd hh
+@sample("tone").note("k56/8 k55/8 k56/8 k55/8 k56/8 k51/8 k54/8 k52/8 k49/2")
+@sample("bd").note("~ c4/4")
+@sample("hh").note("c4/4")
+@sample("bd").note("c4/4")
+@sample("hh").note("c4/4")

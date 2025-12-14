@@ -48,26 +48,35 @@ Commands inside the REPL:
 - `:panic` – silence queued audio immediately.
 - `:help` – show the full list.
 
-Write patterns such as `kick kick kick kick` to place quarter notes at the configured tempo. The transport schedules 200ms
-windows ahead of the audio callback so tempo-stable playback continues while you edit.
+Write patterns by first binding an instrument, then chaining notes and modifiers:
 
-Note tokens:
+```
+@sample("bd").note("c4 c4 c4 c4")
+@sample("tone").note("<c4 e4 g4>/8")
+@sample("piano", bank="default").note("k49 k52 k56/2").postgain(0.7)
+```
 
-- `c4`, `d#4`, `eb3` name pitches (case-insensitive) with octaves 0–8.
+`@sample("name[:variant]")` declares the sound to play and can optionally target a soundbank (use `bank="user"` or an inline
+form such as `@sample("mybank:piano:1")`). If no bank is provided, Musika tries the user registry first and then falls back
+to the default registry. Unknown banks fall back to the default registry with a warning.
+
+The transport still schedules ~200ms ahead of the audio callback so tempo-stable playback continues while you edit.
+
+`.note("...")` accepts several note input styles within the quoted string:
+
+- Note names: `c4`, `d#4`, `eb3` (octaves 0–8).
 - MIDI note numbers: `60`, `62/8`, `69/2`.
 - Piano key numbers: `k1`–`k88` (`k49` = A4/440 Hz, midi = key + 20). Out-of-range keys clamp with a warning.
-- Append `/len` for durations in beats relative to a quarter note: `c4/8` (eighth), `c4/2` (half). Missing `/len` defaults to `/4`.
-- Notes use the built-in `tone` sample (base A4/440 Hz) and set playback rate automatically. Unknown or out-of-range notes
-  print a warning and become rests. The default sample map lists `tone` as `builtin:tone` to signal the generated sine; there
-  is no `assets/tone.wav` file. If `tone` points to a pitched-map instrument (a JSON object of base-note samples), Musika picks
-  the closest base sample and adjusts playback rate relative to that base note.
+- Grouped patterns such as `<c4 e4 g4>/8`, where the trailing duration applies to each grouped note.
 
-Pattern resolution:
+Durations use `/len` relative to a quarter note; missing `/len` defaults to `/4`. Notes always belong to the currently bound
+instrument. The `tone` sample stays available for melodic lines; if a sound exposes a pitched map, Musika snaps to the nearest
+base entry before adjusting playback rate. Instruments without pitched maps ignore MIDI-derived playback-rate changes so
+percussive sounds stay at their recorded pitch.
 
-- Musika resolves sounds from the user registry first, then the default registry. Unknown sounds print a warning
-  ("Unknown sound '<name>' (treated as rest)") and are treated as rests.
-- Use `sound:variant` to pick a specific variant; non-numeric indexes are rejected with a warning. Variant indexes wrap
-  modulo the available variants for a sound.
+Only `.note(...)` produces audible events today; other chained modifiers such as `.postgain(...)`, `.attack(...)`, or
+`.release(...)` are parsed and ignored with a warning so the syntax stays forward-compatible. Legacy patterns that omit
+`@sample(...)` still parse but print a deprecation warning—bind notes to a sample explicitly whenever possible.
 
 Manual verification (quick sanity checks):
 
