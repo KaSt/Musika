@@ -33,6 +33,9 @@ static const char *embedded_default_map =
     "  \"misc\": [\n"
     "    \"misc/cowbell.wav\",\n"
     "    \"misc/clap.wav\"\n"
+    "  ],\n"
+    "  \"tone\": [\n"
+    "    \"./assets/tone.wav\"\n"
     "  ]\n"
     "}\n";
 

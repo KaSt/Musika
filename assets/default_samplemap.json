@@ -21,5 +21,8 @@
   "misc": [
     "misc/cowbell.wav",
     "misc/clap.wav"
+  ],
+  "tone": [
+    "./assets/tone.wav"
   ]
 }

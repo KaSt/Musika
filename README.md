@@ -10,6 +10,7 @@ patterns while audio keeps running.
 
 - Inline text editor inside the terminal to sketch multi-line patterns.
 - Minimal pattern language using space-separated tokens (`kick`, `bd`) that map to the generated kick sample.
+- Melody-friendly note tokens (`c4`, `d#5/8`) that pitch-shift a built-in tone sample without changing syntax elsewhere.
 - Configurable tempo, audio backend name, and remote sample packs through `config.json` (audio runs locally, no downloads).
 - Continuous transport thread that schedules events in deterministic time slices for steady playback.
 
@@ -49,6 +50,13 @@ Commands inside the REPL:
 Write patterns such as `kick kick kick kick` to place quarter notes at the configured tempo. The transport schedules 200ms
 windows ahead of the audio callback so tempo-stable playback continues while you edit.
 
+Note tokens:
+
+- `c4`, `d#4`, `eb3` name pitches (case-insensitive) with octaves 0–8.
+- Append `/len` for durations in beats relative to a quarter note: `c4/8` (eighth), `c4/2` (half). Missing `/len` defaults to `/4`.
+- Notes use the built-in `tone` sample (base A4/440 Hz) and set playback rate automatically. Unknown or out-of-range notes
+  print a warning and become rests.
+
 Pattern resolution:
 
 - Musika resolves sounds from the user registry first, then the default registry. Unknown sounds print a warning
@@ -67,7 +75,7 @@ Manual verification (quick sanity checks):
 The default `config.json` lists a few public repositories that host drum and synth samples from the Strudel/TidalCycles community.
 The built-in kick is generated locally via `./scripts/fetch_kick.sh` to avoid storing binaries in the repository. Remote packs are
 optional; the core experience runs entirely offline once the kick file exists. Musika currently requires `libcurl` for loading
-remote sample maps.
+remote sample maps. The melodic `tone` sample is generated locally when first used so simple melodies work without downloads.
 
 ## Keeping the repository binary-free
 
