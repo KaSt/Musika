@@ -23,6 +23,6 @@
     "misc/clap.wav"
   ],
   "tone": [
-    "./assets/tone.wav"
+    "builtin:tone"
   ]
 }
