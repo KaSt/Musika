@@ -176,7 +176,8 @@ static bool parse_object(const char *json, SampleRegistry *registry) {
 
         if (strcmp(key, "_base") == 0) {
             char *base = parse_string(&p);
-            if (!base) {
+            if (!base || base[0] == '\0') {
+                free(base);
                 free(key);
                 return false;
             }
@@ -208,6 +209,9 @@ static bool parse_object(const char *json, SampleRegistry *registry) {
 
 static bool validate_registry(const SampleRegistry *registry) {
     if (!registry || !registry->name || registry->name[0] == '\0' || registry->sound_count == 0) {
+        return false;
+    }
+    if (registry->base && registry->base[0] == '\0') {
         return false;
     }
     for (size_t i = 0; i < registry->sound_count; ++i) {
