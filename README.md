@@ -60,7 +60,8 @@ optional; the core experience runs entirely offline once the kick file exists.
 Generated audio assets live under `assets/` (ignored by Git). To verify the tree stays free of committed binaries, run:
 
 ```
-./scripts/check_binary_files.sh
+./scripts/check_binary_files.sh            # working tree only
+./scripts/check_binary_files.sh --history  # working tree + all historical blobs
 ```
 
-The helper scans tracked files and exits non-zero if it detects likely binary content so you can clean up before pushing updates.
+The helper scans tracked files (and optionally history) and exits non-zero if it detects likely binary content so you can clean up before pushing updates. Use the history mode when repairing old commits before publishing the branch.
