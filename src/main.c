@@ -55,7 +55,13 @@ static int run_beep_mode(void) {
         return 1;
     }
 
-    audio_engine_queue(&engine, &tone, engine.sample_rate / 10); // start shortly after boot
+    if (!audio_engine_queue(&engine, &tone, engine.sample_rate / 10)) { // start shortly after boot
+        fprintf(stderr, "Beep scheduling failed; exiting beep mode.\n");
+        audio_engine_shutdown(&engine);
+        audio_sample_free(&tone);
+        return 1;
+    }
+
     sleep(3);
 
     audio_engine_shutdown(&engine);
