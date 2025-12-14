@@ -11,7 +11,24 @@ import subprocess
 import sys
 
 PRINTABLE = set(range(32, 127)) | {9, 10, 13}
-HISTORY_MODE = "--history" in sys.argv[1:]
+
+
+def parse_args():
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print("Usage: ./scripts/check_binary_files.sh [--history]\n")
+        print("Scans tracked files (and optionally historical blobs) for likely binary content.")
+        sys.exit(0)
+
+    history_mode = False
+    for arg in args:
+        if arg == "--history":
+            history_mode = True
+        else:
+            print(f"Unknown argument: {arg}", file=sys.stderr)
+            sys.exit(1)
+
+    return history_mode
 
 
 def check_blob(name: str, data: bytes):
@@ -69,6 +86,8 @@ def check_history():
             assert proc.stdin is not None and proc.stdout is not None
 
             assert rev_proc.stdout is not None
+            buffer = bytearray()
+
             for line in rev_proc.stdout:
                 parts = line.strip().split(maxsplit=1)
                 if not parts:
@@ -79,8 +98,15 @@ def check_history():
                     continue
                 seen_hashes.add(obj_hash)
 
-                proc.stdin.write(f"{obj_hash}\n".encode())
-                proc.stdin.flush()
+                buffer.extend(f"{obj_hash}\n".encode())
+                if buffer:
+                    try:
+                        proc.stdin.write(buffer)
+                        proc.stdin.flush()
+                    except BrokenPipeError:
+                        suspicious.append((path, "cat-file exited unexpectedly"))
+                        break
+                    buffer.clear()
 
                 header = proc.stdout.readline()
                 if not header:
@@ -134,8 +160,10 @@ def check_history():
 
 
 def main():
+    history_mode = parse_args()
+
     suspicious = check_working_tree()
-    if HISTORY_MODE:
+    if history_mode:
         suspicious.extend(check_history())
 
     if suspicious:
@@ -144,7 +172,7 @@ def main():
             print(f" - {path}: {reason}")
         sys.exit(2)
     else:
-        if HISTORY_MODE:
+        if history_mode:
             print("No binary files detected in working tree or history.")
         else:
             print("No binary files detected in tracked sources.")
