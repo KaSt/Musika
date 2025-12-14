@@ -19,12 +19,19 @@ typedef struct {
     const AudioSample *sample;
     uint64_t start_frame;
     double playback_rate;
+    bool is_pitched;
+    uint64_t note_duration_frames;
 } ScheduledEvent;
 
 typedef struct {
     const AudioSample *sample;
     uint64_t start_frame;
     double playback_rate;
+    bool is_pitched;
+    uint64_t note_duration_frames;
+    uint64_t note_off_frame;
+    uint64_t attack_frames;
+    uint64_t release_frames;
 } ActiveVoice;
 
 typedef struct {
@@ -47,7 +54,12 @@ bool audio_engine_init(AudioEngine *engine, uint32_t sample_rate, uint32_t chann
 void audio_engine_shutdown(AudioEngine *engine);
 
 bool audio_engine_queue(AudioEngine *engine, const AudioSample *sample, uint64_t start_frame);
-bool audio_engine_queue_rate(AudioEngine *engine, const AudioSample *sample, uint64_t start_frame, double playback_rate);
+bool audio_engine_queue_rate(AudioEngine *engine,
+                            const AudioSample *sample,
+                            uint64_t start_frame,
+                            double playback_rate,
+                            bool is_pitched,
+                            uint64_t note_duration_frames);
 double audio_engine_time_seconds(const AudioEngine *engine);
 void audio_engine_panic(AudioEngine *engine);
 

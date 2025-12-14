@@ -188,7 +188,20 @@ static void *transport_thread(void *user) {
                 const AudioSample *sample = load_sample_for_ref(t, &step->sample);
                 if (sample) {
                     uint64_t start_frame = (uint64_t)(t->next_event_time * (double)t->audio->sample_rate);
-                    audio_engine_queue_rate(t->audio, sample, start_frame, step->playback_rate > 0.0 ? step->playback_rate : 1.0);
+                    uint64_t note_duration_frames = 0;
+                    if (step->has_midi_note) {
+                        double seconds = step->duration_beats * t->seconds_per_beat;
+                        note_duration_frames = (uint64_t)(seconds * (double)t->audio->sample_rate);
+                        if (note_duration_frames == 0) {
+                            note_duration_frames = 1;
+                        }
+                    }
+                    audio_engine_queue_rate(t->audio,
+                                            sample,
+                                            start_frame,
+                                            step->playback_rate > 0.0 ? step->playback_rate : 1.0,
+                                            step->has_midi_note,
+                                            note_duration_frames);
                 }
             }
             t->next_event_time += step->duration_beats * t->seconds_per_beat;

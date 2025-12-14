@@ -22,6 +22,9 @@ static void audio_callback(ma_device *device, void *output, const void *input, m
     const uint32_t channels = engine->channels;
     memset(out, 0, sizeof(float) * frame_count * channels);
 
+    const uint64_t attack_frames = (uint64_t)((double)engine->sample_rate * 0.005);
+    const uint64_t base_release_frames = (uint64_t)((double)engine->sample_rate * 0.040);
+
     if (atomic_exchange(&engine->panic, false)) {
         engine->voice_count = 0;
         atomic_store(&engine->event_tail, atomic_load(&engine->event_head));
@@ -43,6 +46,27 @@ static void audio_callback(ma_device *device, void *output, const void *input, m
                 voice->sample = ev->sample;
                 voice->start_frame = ev->start_frame;
                 voice->playback_rate = (ev->playback_rate > 0.0) ? ev->playback_rate : 1.0;
+                voice->is_pitched = ev->is_pitched;
+                voice->note_duration_frames = ev->note_duration_frames;
+                voice->attack_frames = attack_frames > 0 ? attack_frames : 1;
+                voice->release_frames = base_release_frames > 0 ? base_release_frames : 1;
+                voice->note_off_frame = 0;
+
+                if (voice->is_pitched) {
+                    if (voice->note_duration_frames > 0) {
+                        uint64_t max_release = voice->note_duration_frames / 2;
+                        if (max_release == 0) max_release = 1;
+                        if (voice->release_frames > max_release) {
+                            voice->release_frames = max_release;
+                        }
+                        voice->note_off_frame = voice->start_frame + voice->note_duration_frames;
+                    }
+                } else {
+                    voice->note_duration_frames = 0;
+                    voice->note_off_frame = 0;
+                    voice->attack_frames = 0;
+                    voice->release_frames = 0;
+                }
             }
 
             tail = next_index(tail);
@@ -70,10 +94,29 @@ static void audio_callback(ma_device *device, void *output, const void *input, m
                 continue;
             }
 
+            double amplitude = 1.0;
+            if (voice->is_pitched) {
+                uint64_t frames_since_start = global_frame - voice->start_frame;
+
+                if (voice->attack_frames > 0 && frames_since_start < voice->attack_frames) {
+                    amplitude *= (double)frames_since_start / (double)voice->attack_frames;
+                }
+
+                if (voice->note_off_frame > 0 && global_frame >= voice->note_off_frame) {
+                    uint64_t release_pos = global_frame - voice->note_off_frame;
+                    if (release_pos >= voice->release_frames) {
+                        engine->voices[v] = engine->voices[--engine->voice_count];
+                        continue;
+                    }
+                    double release_amp = 1.0 - ((double)release_pos / (double)voice->release_frames);
+                    amplitude *= release_amp;
+                }
+            }
+
             for (uint32_t ch = 0; ch < channels; ++ch) {
                 uint32_t sample_ch = ch % voice->sample->channels;
                 float s = voice->sample->data[offset_i * voice->sample->channels + sample_ch];
-                out[frame * channels + ch] += s;
+                out[frame * channels + ch] += (float)(s * amplitude);
             }
             ++v;
         }
@@ -121,10 +164,15 @@ void audio_engine_shutdown(AudioEngine *engine) {
 }
 
 bool audio_engine_queue(AudioEngine *engine, const AudioSample *sample, uint64_t start_frame) {
-    return audio_engine_queue_rate(engine, sample, start_frame, 1.0);
+    return audio_engine_queue_rate(engine, sample, start_frame, 1.0, false, 0);
 }
 
-bool audio_engine_queue_rate(AudioEngine *engine, const AudioSample *sample, uint64_t start_frame, double playback_rate) {
+bool audio_engine_queue_rate(AudioEngine *engine,
+                            const AudioSample *sample,
+                            uint64_t start_frame,
+                            double playback_rate,
+                            bool is_pitched,
+                            uint64_t note_duration_frames) {
     size_t head = atomic_load(&engine->event_head);
     size_t next = next_index(head);
     size_t tail = atomic_load(&engine->event_tail);
@@ -134,6 +182,8 @@ bool audio_engine_queue_rate(AudioEngine *engine, const AudioSample *sample, uin
     engine->event_queue[head].sample = sample;
     engine->event_queue[head].start_frame = start_frame;
     engine->event_queue[head].playback_rate = (playback_rate > 0.0) ? playback_rate : 1.0;
+    engine->event_queue[head].is_pitched = is_pitched;
+    engine->event_queue[head].note_duration_frames = note_duration_frames;
     atomic_store(&engine->event_head, next);
     return true;
 }
