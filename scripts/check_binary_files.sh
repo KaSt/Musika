@@ -149,12 +149,16 @@ def check_history():
 
             proc.stdin.close()
             proc.wait()
+            if proc.returncode not in (0, None):
+                suspicious.append(("history", f"git cat-file exited with status {proc.returncode}"))
     except subprocess.CalledProcessError as exc:
         suspicious.append(("history", f"git cat-file failed: {exc}"))
     finally:
         if rev_proc.poll() is None:
             rev_proc.terminate()
         rev_proc.wait()
+        if rev_proc.returncode not in (0, None):
+            suspicious.append(("history", f"git rev-list exited with status {rev_proc.returncode}"))
 
     return suspicious
 
