@@ -7,10 +7,9 @@
 
 enum { TOKEN_BUFFER_LEN = 64 };
 
-static void add_step(Pattern *pattern, const SampleRef *sample, int sample_id, double duration) {
+static void add_step(Pattern *pattern, const SampleRef *sample, double duration) {
     if (pattern->step_count >= sizeof(pattern->steps) / sizeof(pattern->steps[0])) return;
     pattern->steps[pattern->step_count].sample = *sample;
-    pattern->steps[pattern->step_count].sample_id = sample_id;
     pattern->steps[pattern->step_count].duration_beats = duration;
     pattern->step_count += 1;
 }
@@ -105,8 +104,8 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
             memcpy(token, line + start, copy_len);
             token[copy_len] = '\0';
             SampleRef ref = resolve_sample(token, default_registry, user_registry);
-            int sample_id = ref.valid ? 0 : -1;
-            add_step(out_pattern, &ref, sample_id, 1.0);
+            // Duration is intentionally fixed to one beat per token; extend parsing only when new syntax is introduced.
+            add_step(out_pattern, &ref, 1.0);
         }
     }
 

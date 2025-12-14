@@ -34,9 +34,9 @@ static void *transport_thread(void *user) {
 
         while (t->next_event_time <= horizon) {
             PatternStep *step = &pattern->steps[t->next_step];
-            if (step->sample_id >= 0 && (size_t)step->sample_id < t->sample_count) {
+            if (step->sample.valid && t->sample_count > 0) {
                 uint64_t start_frame = (uint64_t)(t->next_event_time * (double)t->audio->sample_rate);
-                audio_engine_queue(t->audio, &t->samples[step->sample_id], start_frame);
+                audio_engine_queue(t->audio, &t->samples[0], start_frame);
             }
             t->next_event_time += step->duration_beats * t->seconds_per_beat;
             t->next_step = (t->next_step + 1) % pattern->step_count;

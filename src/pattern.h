@@ -15,7 +15,6 @@ typedef struct {
 
 typedef struct {
     SampleRef sample;
-    int sample_id;
     double duration_beats;
 } PatternStep;
 
