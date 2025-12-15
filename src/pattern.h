@@ -19,6 +19,7 @@ typedef struct {
     double playback_rate;
     int midi_note;
     bool has_midi_note;
+    bool advance_time;
 } PatternStep;
 
 typedef struct {

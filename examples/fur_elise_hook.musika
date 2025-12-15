@@ -1,4 +1,4 @@
-@sample("tone").note("e5/8 d#5/8 e5/8 d#5/8 e5/8 b4/8 d5/8 c5/8 a4/2")
+@sample("tone").note("<e5 b4>/8 d#5/8 e5/8 d#5/8 e5/8 b4/8 d5/8 c5/8 a4/2")
 @sample("bd").note("x ~ x ~")
 @sample("hh").note("x x x x")
 @sample("bd").note("x ~ x ~")

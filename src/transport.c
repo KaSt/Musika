@@ -204,7 +204,9 @@ static void *transport_thread(void *user) {
                                             note_duration_frames);
                 }
             }
-            t->next_event_time += step->duration_beats * t->seconds_per_beat;
+            if (step->advance_time) {
+                t->next_event_time += step->duration_beats * t->seconds_per_beat;
+            }
             t->next_step = (t->next_step + 1) % pattern->step_count;
         }
 
