@@ -178,6 +178,56 @@ static void record_modifier_warning(ModifierWarningState *state, const char *nam
     }
 }
 
+static bool parse_positive_int(const char *text, int *out_value, const char **rest_out) {
+    if (out_value) *out_value = 0;
+    const char *start = skip_spaces(text);
+    if (!start || *start == '\0') return false;
+    char *end = NULL;
+    long value = strtol(start, &end, 10);
+    const char *rest = skip_spaces(end);
+    if (end == start || value < 1) {
+        return false;
+    }
+    if (rest_out) *rest_out = rest;
+    if (out_value) *out_value = (int)value;
+    return true;
+}
+
+static void warn_once_for_modifier(const char *name, const char *message, ModifierWarningState *state) {
+    if (!name || !message || !state) return;
+    if (modifier_warned(state, name)) return;
+    fprintf(stderr, "%s\n", message);
+    record_modifier_warning(state, name);
+}
+
+static bool parse_time_transform_string(const char *text, TimeTransformType *out_type, int *out_factor) {
+    if (!text || !out_type || !out_factor) return false;
+    const char *p = skip_spaces(text);
+    const char *name_start = p;
+    while (*p && !isspace((unsigned char)*p)) ++p;
+    size_t name_len = (size_t)(p - name_start);
+    if (name_len == 0 || name_len > 16) return false;
+    char name[17];
+    memcpy(name, name_start, name_len);
+    name[name_len] = '\0';
+
+    int factor = 0;
+    const char *rest = NULL;
+    if (!parse_positive_int(p, &factor, &rest)) return false;
+    if (*skip_spaces(rest) != '\0') return false;
+
+    if (equals_ci(name, "fast")) {
+        *out_type = TIME_TRANSFORM_FAST;
+    } else if (equals_ci(name, "slow")) {
+        *out_type = TIME_TRANSFORM_SLOW;
+    } else {
+        return false;
+    }
+
+    *out_factor = factor;
+    return true;
+}
+
 static NoteParseResult parse_note_token(const char *token, MusicalContext *context, NoteStep *out_step) {
     if (!token || !out_step) return NOTE_PARSE_NONE;
 
@@ -351,6 +401,8 @@ static void append_note_step(Pattern *pattern,
     step.midi_note = note_step->midi_note;
     step.has_midi_note = note_step->has_midi_note;
     step.advance_time = advance_time;
+    step.chain_id = -1;
+    step.time_scale = 1.0;
 
     if (result == NOTE_PARSE_OK || result == NOTE_PARSE_HIT) {
         if (sample && sample->valid) {
@@ -652,9 +704,16 @@ static void parse_modifier_chain(const char *text,
                                  ModifierWarningState *modifier_warnings,
                                  MusicalContext *musical_context,
                                  bool *pitch_clamp_warned,
-                                 bool *percussion_chord_warned) {
+                                 bool *percussion_chord_warned,
+                                 PatternChain *chain,
+                                 int chain_id) {
     size_t start_index = pattern ? pattern->step_count : 0;
     int semitone_shift = 0;
+    double base_time_scale = chain ? (chain->base_time_scale > 0.0 ? chain->base_time_scale : 1.0) : 1.0;
+    bool has_every = chain ? chain->has_every : false;
+    int every_interval = chain ? chain->every_interval : 0;
+    TimeTransformType every_type = chain ? chain->every_type : TIME_TRANSFORM_NONE;
+    int every_factor = chain ? chain->every_factor : 0;
     const char *p = text;
     while (p && *p) {
         p = skip_spaces(p);
@@ -762,6 +821,52 @@ static void parse_modifier_chain(const char *text,
                     musical_context->has_scale = true;
                 }
             }
+        } else if (equals_ci(name, "fast")) {
+            int factor = 0;
+            const char *rest_ptr = NULL;
+            if (!parse_positive_int(arg_buf, &factor, &rest_ptr) || *skip_spaces(rest_ptr) != '\0') {
+                warn_once_for_modifier(name, "Warning: .fast() expects a positive integer (ignored)", modifier_warnings);
+            } else if (factor >= 1) {
+                base_time_scale /= (double)factor;
+            }
+        } else if (equals_ci(name, "slow")) {
+            int factor = 0;
+            const char *rest_ptr = NULL;
+            if (!parse_positive_int(arg_buf, &factor, &rest_ptr) || *skip_spaces(rest_ptr) != '\0') {
+                warn_once_for_modifier(name, "Warning: .slow() expects a positive integer (ignored)", modifier_warnings);
+            } else if (factor >= 1) {
+                base_time_scale *= (double)factor;
+            }
+        } else if (equals_ci(name, "every")) {
+            int interval = 0;
+            const char *after_interval = NULL;
+            const char *arg_ptr = skip_spaces(arg_buf);
+            if (!parse_positive_int(arg_ptr, &interval, &after_interval)) {
+                warn_once_for_modifier(name, "Warning: .every() expects an integer interval and transform (ignored)", modifier_warnings);
+                p = after_paren;
+                continue;
+            }
+            const char *transform_part = skip_spaces(after_interval);
+            if (*transform_part == ',') {
+                transform_part++;
+            }
+            char transform_text[64];
+            if (!copy_quoted_string(&transform_part, transform_text, sizeof(transform_text), truncated_token_seen)) {
+                warn_once_for_modifier(name, "Warning: .every() requires a quoted transform like \"fast 2\" (ignored)", modifier_warnings);
+            } else if (*skip_spaces(transform_part) != '\0') {
+                warn_once_for_modifier(name, "Warning: .every() has unexpected trailing characters (ignored)", modifier_warnings);
+            } else {
+                TimeTransformType ttype = TIME_TRANSFORM_NONE;
+                int tfactor = 0;
+                if (!parse_time_transform_string(transform_text, &ttype, &tfactor)) {
+                    warn_once_for_modifier(name, "Warning: .every() supports only \"fast k\" or \"slow k\" transforms (ignored)", modifier_warnings);
+                } else {
+                    has_every = true;
+                    every_interval = interval;
+                    every_type = ttype;
+                    every_factor = tfactor;
+                }
+            }
         } else {
             if (!modifier_warned(modifier_warnings, name)) {
                 fprintf(stderr, "Warning: modifier '%s' is not implemented yet (ignored)\n", name);
@@ -777,6 +882,22 @@ static void parse_modifier_chain(const char *text,
         for (size_t i = start_index; i < end_index; ++i) {
             apply_pitch_shift_to_step(&pattern->steps[i], semitone_shift, pitch_clamp_warned);
         }
+    }
+
+    if (pattern) {
+        size_t end_index = pattern->step_count;
+        for (size_t i = start_index; i < end_index; ++i) {
+            pattern->steps[i].chain_id = chain_id;
+            pattern->steps[i].time_scale = 1.0;
+        }
+    }
+
+    if (chain) {
+        chain->base_time_scale = base_time_scale;
+        chain->has_every = has_every;
+        chain->every_interval = every_interval;
+        chain->every_type = every_type;
+        chain->every_factor = every_factor;
     }
 }
 
@@ -920,6 +1041,9 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
     bool deprecated_notes = false;
     SampleRef current_sample = {0};
     bool have_current_sample = false;
+    PatternChain *current_chain = NULL;
+    int current_chain_id = -1;
+    bool chain_capacity_warned = false;
     ModifierWarningState modifier_warnings = {0};
     bool pitch_clamp_warned = false;
     bool percussion_chord_warned = false;
@@ -937,6 +1061,18 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
             if (parse_sample_invocation(trimmed, default_registry, user_registry, &parsed_sample, &rest, &truncated_token_seen)) {
                 current_sample = parsed_sample;
                 have_current_sample = true;
+                current_chain = NULL;
+                current_chain_id = -1;
+                if (out_pattern->chain_count < (sizeof(out_pattern->chains) / sizeof(out_pattern->chains[0]))) {
+                    current_chain_id = (int)out_pattern->chain_count;
+                    current_chain = &out_pattern->chains[out_pattern->chain_count++];
+                    *current_chain = (PatternChain){0};
+                    current_chain->id = current_chain_id;
+                    current_chain->base_time_scale = 1.0;
+                } else if (!chain_capacity_warned) {
+                    fprintf(stderr, "Warning: maximum chain count reached; additional chains will ignore tempo transforms\n");
+                    chain_capacity_warned = true;
+                }
                 musical_context = (MusicalContext){0};
                 musical_context.scale = SCALE_MODE_MAJOR;
                 parse_modifier_chain(rest,
@@ -947,7 +1083,9 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
                                     &modifier_warnings,
                                     &musical_context,
                                     &pitch_clamp_warned,
-                                    &percussion_chord_warned);
+                                    &percussion_chord_warned,
+                                    current_chain,
+                                    current_chain_id);
                 continue;
             }
 
@@ -960,7 +1098,9 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
                                  &modifier_warnings,
                                  &musical_context,
                                  &pitch_clamp_warned,
-                                 &percussion_chord_warned);
+                                 &percussion_chord_warned,
+                                 current_chain,
+                                 current_chain_id);
             continue;
         }
 
@@ -1014,6 +1154,8 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
             step.has_midi_note = false;
             step.midi_note = 0;
             step.advance_time = true;
+            step.chain_id = -1;
+            step.time_scale = 1.0;
             add_step(out_pattern, &step);
         }
     }

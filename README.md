@@ -81,6 +81,23 @@ Examples of pitch helpers on a melodic chain:
 @sample("tone").note("c4 e4 g4").transpose(-3)
 ```
 
+### Time transforms
+
+Accelerate or slow down a chain without touching the note text:
+
+```
+@sample("bd").note("x x x x").fast(2)   # double-speed
+@sample("bd").note("x x x x").slow(2)   # half-speed
+```
+
+Use `.every(n, "fast k")` or `.every(n, "slow k")` to apply a temporary tempo change on specific cycles:
+
+```
+@sample("hh").note("x x x x").every(4, "fast 2")
+```
+
+Transforms stay scoped to the chain they are called on; other chains continue at their own timing.
+
 ### Key/Scale + Degrees
 
 Bind a key and scale to the current `@sample` chain, then write degrees Strudel-style:

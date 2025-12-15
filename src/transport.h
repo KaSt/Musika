@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdatomic.h>
+#include <stdint.h>
 
 #include "../audio/audio.h"
 #include "pattern.h"
@@ -22,6 +23,7 @@ typedef struct {
 
     double next_event_time;
     size_t next_step;
+    uint64_t cycle_count;
 
     struct {
         char key[256];
