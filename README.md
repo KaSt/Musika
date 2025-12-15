@@ -72,6 +72,8 @@ The transport still schedules ~200ms ahead of the audio callback so tempo-stable
 - Rests: `~` yields silence for the given duration (defaults to `/4`).
 - Sharps (`#`), flats (`b`), and octave numbers belong to the note syntax itself.
 
+Chord reminder: wrap space-separated notes in `< >`. A duration after the closing `>` applies to each note in the group, and `~` inside a chord is simply ignored (no voice, no timing shift).
+
 Examples of pitch helpers on a melodic chain:
 
 ```
@@ -101,6 +103,8 @@ percussive sounds stay at their recorded pitch.
 Only `.note(...)` produces audible events today; other chained modifiers such as `.postgain(...)`, `.attack(...)`, or
 `.release(...)` are parsed and ignored with a warning so the syntax stays forward-compatible. Legacy patterns that omit
 `@sample(...)` still parse but print a deprecation warning—bind notes to a sample explicitly whenever possible.
+
+Playback articulation: pitched notes keep a short release tail (legato-lite) so repeated notes or overlapping chords can decay naturally instead of cutting off the moment a new note starts. There is no sustain pedal or extra API—this is a built-in smoothing pass for back-to-back melodic events.
 
 Manual verification (quick sanity checks):
 
