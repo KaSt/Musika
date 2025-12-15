@@ -96,22 +96,15 @@ bool text_buffer_save_to_path(const TextBuffer *buffer, const char *path) {
     if (!buffer || !path) return false;
     FILE *f = fopen(path, "w");
     if (!f) return false;
-    bool ok = true;
+
     for (size_t i = 0; i < buffer->length; ++i) {
-        const char *line = buffer->lines[i] ? buffer->lines[i] : "";
-        if (fputs(line, f) == EOF) {
-            ok = false;
-            break;
-        }
-        if (i + 1 < buffer->length) {
-            if (fputc('\n', f) == EOF) {
-                ok = false;
-                break;
-            }
-        }
+        const char *s = buffer->lines[i] ? buffer->lines[i] : "";
+        fputs(s, f);
+        if (i + 1 < buffer->length) fputc('\n', f);
     }
+
     fclose(f);
-    return ok;
+    return true;
 }
 
 void text_buffer_insert_char(TextBuffer *buffer, size_t row, size_t col, char c) {
