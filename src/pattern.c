@@ -623,6 +623,8 @@ static void parse_note_sequence(const char *text,
                     token_to_emit = combined;
                 }
                 bool advance_time = !treat_as_chord || i == 0;
+                // Within a chord group, "~" is treated as a rest token: it emits no
+                // voice and does not affect chord timing.
                 emit_note_token(token_to_emit, sample, context, pattern, truncated_token_seen, missing_sample_warned, advance_time);
             }
             continue;

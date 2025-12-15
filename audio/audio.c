@@ -54,11 +54,9 @@ static void audio_callback(ma_device *device, void *output, const void *input, m
 
                 if (voice->is_pitched) {
                     if (voice->note_duration_frames > 0) {
-                        uint64_t max_release = voice->note_duration_frames / 2;
-                        if (max_release == 0) max_release = 1;
-                        if (voice->release_frames > max_release) {
-                            voice->release_frames = max_release;
-                        }
+                        // Allow pitched notes to finish their release even when the next
+                        // note overlaps (legato-lite). Keep a consistent release instead
+                        // of clamping it to the note length so repeated notes do not hard cut.
                         voice->note_off_frame = voice->start_frame + voice->note_duration_frames;
                     }
                 } else {
