@@ -293,6 +293,45 @@ static void append_note_step(Pattern *pattern,
     add_step(pattern, &step);
 }
 
+static void apply_pitch_shift_to_step(PatternStep *step, int semitone_shift, bool *pitch_clamp_warned) {
+    if (!step || semitone_shift == 0 || !step->has_midi_note) return;
+    if (!step->sample.valid || !step->sample.sound) return;
+    if (step->sample.sound->pitched_entry_count == 0 &&
+        !(step->sample.sound->name && strcmp(step->sample.sound->name, "tone") == 0)) {
+        return;
+    }
+
+    int midi = step->midi_note + semitone_shift;
+    if (midi < 0) {
+        midi = 0;
+        if (pitch_clamp_warned && !*pitch_clamp_warned) {
+            fprintf(stderr, "Warning: transposed pitch clamped to 0 (valid MIDI range 0-127)\n");
+            *pitch_clamp_warned = true;
+        }
+    } else if (midi > 127) {
+        midi = 127;
+        if (pitch_clamp_warned && !*pitch_clamp_warned) {
+            fprintf(stderr, "Warning: transposed pitch clamped to 127 (valid MIDI range 0-127)\n");
+            *pitch_clamp_warned = true;
+        }
+    }
+
+    step->midi_note = midi;
+
+    if (step->sample.sound->pitched_entry_count > 0) {
+        size_t variant_index = step->sample.variant_index;
+        int base_midi = BASE_MIDI_TONE;
+        if (pick_pitched_variant(step->sample.sound, midi, &variant_index, &base_midi)) {
+            step->sample.variant_index = variant_index;
+            step->playback_rate = pow(2.0, ((double)midi - (double)base_midi) / 12.0);
+        } else {
+            step->playback_rate = pow(2.0, ((double)midi - (double)BASE_MIDI_TONE) / 12.0);
+        }
+    } else {
+        step->playback_rate = pow(2.0, ((double)midi - (double)BASE_MIDI_TONE) / 12.0);
+    }
+}
+
 static bool parse_variant_index(const char *text, size_t *out_index) {
     if (!text || !out_index) return false;
     if (text[0] == '\0') {
@@ -502,7 +541,10 @@ static void parse_modifier_chain(const char *text,
                                  Pattern *pattern,
                                  bool *truncated_token_seen,
                                  bool *missing_sample_warned,
-                                 ModifierWarningState *modifier_warnings) {
+                                 ModifierWarningState *modifier_warnings,
+                                 bool *pitch_clamp_warned) {
+    size_t start_index = pattern ? pattern->step_count : 0;
+    int semitone_shift = 0;
     const char *p = text;
     while (p && *p) {
         p = skip_spaces(p);
@@ -554,6 +596,26 @@ static void parse_modifier_chain(const char *text,
             } else {
                 parse_note_sequence(note_text, sample, pattern, truncated_token_seen, missing_sample_warned);
             }
+        } else if (equals_ci(name, "octave")) {
+            const char *arg_ptr = skip_spaces(arg_buf);
+            char *end = NULL;
+            long delta = strtol(arg_ptr, &end, 10);
+            const char *rest = skip_spaces(end);
+            if (end == arg_ptr || *rest != '\0') {
+                fprintf(stderr, "Warning: .octave() expects a numeric argument\n");
+            } else {
+                semitone_shift += (int)(delta * 12);
+            }
+        } else if (equals_ci(name, "transpose")) {
+            const char *arg_ptr = skip_spaces(arg_buf);
+            char *end = NULL;
+            long delta = strtol(arg_ptr, &end, 10);
+            const char *rest = skip_spaces(end);
+            if (end == arg_ptr || *rest != '\0') {
+                fprintf(stderr, "Warning: .transpose() expects a numeric argument\n");
+            } else {
+                semitone_shift += (int)delta;
+            }
         } else {
             if (!modifier_warned(modifier_warnings, name)) {
                 fprintf(stderr, "Warning: modifier '%s' is not implemented yet (ignored)\n", name);
@@ -562,6 +624,13 @@ static void parse_modifier_chain(const char *text,
         }
 
         p = after_paren;
+    }
+
+    if (semitone_shift != 0 && pattern) {
+        size_t end_index = pattern->step_count;
+        for (size_t i = start_index; i < end_index; ++i) {
+            apply_pitch_shift_to_step(&pattern->steps[i], semitone_shift, pitch_clamp_warned);
+        }
     }
 }
 
@@ -706,6 +775,7 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
     SampleRef current_sample = {0};
     bool have_current_sample = false;
     ModifierWarningState modifier_warnings = {0};
+    bool pitch_clamp_warned = false;
 
     for (size_t i = 0; i < line_count; ++i) {
         char *line = lines[i];
@@ -718,12 +788,12 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
         if (parse_sample_invocation(trimmed, default_registry, user_registry, &parsed_sample, &rest, &truncated_token_seen)) {
             current_sample = parsed_sample;
             have_current_sample = true;
-            parse_modifier_chain(rest, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings);
+            parse_modifier_chain(rest, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &pitch_clamp_warned);
             continue;
         }
 
         if (have_current_sample && trimmed[0] == '.') {
-            parse_modifier_chain(trimmed, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings);
+            parse_modifier_chain(trimmed, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &pitch_clamp_warned);
             continue;
         }
 
