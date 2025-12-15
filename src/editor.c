@@ -79,7 +79,9 @@ bool text_buffer_load_file(TextBuffer *buffer, const char *path) {
             line[--read] = '\0';
         }
         text_buffer_ensure_line(buffer, buffer->length);
-        buffer->lines[buffer->length - 1] = strdup_safe(line);
+        size_t idx = buffer->length - 1;
+        free(buffer->lines[idx]);
+        buffer->lines[idx] = strdup_safe(line);
     }
     free(line);
     fclose(f);
@@ -94,15 +96,22 @@ bool text_buffer_save_to_path(const TextBuffer *buffer, const char *path) {
     if (!buffer || !path) return false;
     FILE *f = fopen(path, "w");
     if (!f) return false;
+    bool ok = true;
     for (size_t i = 0; i < buffer->length; ++i) {
         const char *line = buffer->lines[i] ? buffer->lines[i] : "";
-        fprintf(f, "%s", line);
+        if (fputs(line, f) == EOF) {
+            ok = false;
+            break;
+        }
         if (i + 1 < buffer->length) {
-            fputc('\n', f);
+            if (fputc('\n', f) == EOF) {
+                ok = false;
+                break;
+            }
         }
     }
     fclose(f);
-    return true;
+    return ok;
 }
 
 void text_buffer_insert_char(TextBuffer *buffer, size_t row, size_t col, char c) {
@@ -129,19 +138,25 @@ void text_buffer_insert_newline(TextBuffer *buffer, size_t row, size_t col) {
     size_t len = line ? strlen(line) : 0;
     if (col > len) col = len;
 
+    char *head = line ? strdup_range(line, col) : strdup_safe("");
     char *tail = line ? strdup_safe(line + col) : strdup_safe("");
-    if (line) {
-        char *new_line = strdup_range(line, col);
-        free(line);
-        buffer->lines[row] = new_line ? new_line : strdup_safe("");
-    } else {
-        buffer->lines[row] = strdup_safe("");
+    if (!head || !tail) {
+        free(head);
+        free(tail);
+        return;
     }
 
-    buffer->lines = realloc(buffer->lines, sizeof(char *) * (buffer->length + 1));
-    if (!buffer->lines) return;
+    free(buffer->lines[row]);
+    buffer->lines[row] = head;
+
+    char **new_lines = realloc(buffer->lines, sizeof(char *) * (buffer->length + 1));
+    if (!new_lines) {
+        free(tail);
+        return;
+    }
+    buffer->lines = new_lines;
     memmove(&buffer->lines[row + 2], &buffer->lines[row + 1], sizeof(char *) * (buffer->length - (row + 1)));
-    buffer->lines[row + 1] = tail ? tail : strdup_safe("");
+    buffer->lines[row + 1] = tail;
     buffer->length += 1;
 }
 
