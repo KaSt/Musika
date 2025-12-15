@@ -226,24 +226,16 @@ static NoteParseResult parse_note_token(const char *token, MusicalContext *conte
         if (token_copy[idx] != '\0' || degree < 1 || degree > 7) {
             fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
         } else {
-            int key_semitone = 0;
-            ScaleMode scale_mode = SCALE_MODE_MAJOR;
-            bool warn_default = true;
-            if (context) {
-                if (context->has_key) {
-                    key_semitone = context->key_semitone;
-                    warn_default = false;
-                }
-                if (context->has_scale) {
-                    scale_mode = context->scale;
-                    warn_default = warn_default && !context->has_key;
-                } else {
-                    warn_default = true;
-                }
-            }
-            if (context && warn_default && !context->degree_default_warned) {
+            bool missing_key = !(context && context->has_key);
+            bool missing_scale = !(context && context->has_scale);
+            int key_semitone = missing_key ? 0 : context->key_semitone;
+            ScaleMode scale_mode = missing_scale ? SCALE_MODE_MAJOR : context->scale;
+            bool warn_default = missing_key;
+            if (warn_default && (!context || !context->degree_default_warned)) {
                 fprintf(stderr, "Warning: degree used without .key/.scale; defaulting to C major\n");
-                context->degree_default_warned = true;
+                if (context) {
+                    context->degree_default_warned = true;
+                }
             }
 
             static const int major_offsets[7] = {0, 2, 4, 5, 7, 9, 11};
