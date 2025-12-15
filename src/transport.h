@@ -23,7 +23,7 @@ typedef struct {
 
     double next_event_time;
     size_t next_step;
-    uint64_t cycle_count;
+    uint64_t cycle_count; // counts completed pattern cycles (full wraps through the step list)
 
     struct {
         char key[256];

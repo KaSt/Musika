@@ -36,7 +36,7 @@ typedef struct {
     bool has_midi_note;
     bool advance_time;
     int chain_id;
-    double time_scale;
+    double time_scale; // reserved for future per-step time transforms
 } PatternStep;
 
 typedef struct {

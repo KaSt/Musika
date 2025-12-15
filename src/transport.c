@@ -216,6 +216,9 @@ static void *transport_thread(void *user) {
 
         while (t->next_event_time <= horizon) {
             PatternStep *step = &pattern->steps[t->next_step];
+            // cycle_number represents the upcoming pattern-cycle boundary: one full wrap
+            // through the compiled step list. .every() uses this global counter, not a
+            // per-chain or per-bar metric.
             uint64_t cycle_number = t->cycle_count + 1;
             double scaled_duration_beats = step->duration_beats * chain_time_scale(pattern, step, cycle_number);
             if (step->sample.valid) {
@@ -243,6 +246,7 @@ static void *transport_thread(void *user) {
             }
             t->next_step = (t->next_step + 1) % pattern->step_count;
             if (t->next_step == 0) {
+                // Completed one full pattern cycle (wrap from last step back to step 0).
                 t->cycle_count++;
             }
         }

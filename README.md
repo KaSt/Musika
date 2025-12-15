@@ -98,6 +98,12 @@ Use `.every(n, "fast k")` or `.every(n, "slow k")` to apply a temporary tempo ch
 
 Transforms stay scoped to the chain they are called on; other chains continue at their own timing.
 
+#### Cycle semantics
+
+- A cycle is one full wrap through the compiled pattern step list (when scheduling wraps from the last step back to step 0).
+- `.every(n, ...)` uses this global pattern-cycle counter; it does not reset per chain and it is not aligned to musical bars.
+- Example: `.every(4, "fast 2")` activates on cycles 4, 8, 12, etc., across the entire pattern.
+
 ### Key/Scale + Degrees
 
 Bind a key and scale to the current `@sample` chain, then write degrees Strudel-style:
