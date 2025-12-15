@@ -31,22 +31,21 @@ Generate the kick sample (only needed once per checkout or after cleaning `asset
 ./scripts/fetch_kick.sh
 ```
 
-Audible beep test:
-```bash
-./musika --beep
-```
+Startup modes:
 
-Live coding loop:
-```bash
-./musika
-```
+- **Play a file immediately:** `./musika song.musika` (or `./musika --play song.musika`) loads, compiles, and starts playback. Press `Ctrl+C` to stop.
+- **Open the fullscreen editor:** `./musika` with no args, or `./musika --edit [file]`, opens a Vim-like TUI editor with an empty buffer or the provided file.
+- **Compile check only:** `./musika --check file.musika` parses the file and exits 0/1.
+- **Version:** `./musika --version`
 
-Commands inside the REPL:
-- `:edit` – open the inline buffer (finish with a `.` line).
-- `:eval` – parse the buffer and arm it as the active pattern.
-- `:play` / `:stop` – start or pause transport without tearing down the audio device.
-- `:panic` – silence queued audio immediately.
-- `:help` – show the full list.
+### Editor basics
+
+- Modes: `ESC` for **NORMAL**, `i` for **INSERT**. Normal mode uses `h/j/k/l` to move.
+- Commands: `:` enters the command prompt. Supported commands:
+  - `:play` / `:stop` – compile + start playback or pause.
+  - `:w` – save to the current filename; `:w <path>` saves as.
+  - `:q` – quit (blocked if modified), `:q!` – force quit, `:wq` – save and quit.
+- Editing: typed characters insert in INSERT mode; `Backspace` deletes; `Enter` inserts a newline; `dd` deletes a line.
 
 Write patterns by first binding an instrument, then chaining notes and modifiers:
 
