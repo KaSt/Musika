@@ -70,8 +70,7 @@ The transport still schedules ~200ms ahead of the audio callback so tempo-stable
 - Grouped patterns such as `<c4 e4 g4>/8`, where the trailing duration applies to each grouped note.
 - Percussive hits: `x` (or `1`) for an unpitched trigger on the bound sample.
 - Rests: `~` yields silence for the given duration (defaults to `/4`).
-- Sharps (`#`), flats (`b`), and octave numbers belong to the note syntax itself. Key/scale helpers such as
-  `major`/`minor` will surface later as separate `.key()`/`.scale()` modifiers rather than inline note tokens.
+- Sharps (`#`), flats (`b`), and octave numbers belong to the note syntax itself.
 
 Examples of pitch helpers on a melodic chain:
 
@@ -79,6 +78,20 @@ Examples of pitch helpers on a melodic chain:
 @sample("tone").note("c4 e4 g4").octave(1)
 @sample("tone").note("c4 e4 g4").transpose(-3)
 ```
+
+### Key/Scale + Degrees
+
+Bind a key and scale to the current `@sample` chain, then write degrees Strudel-style:
+
+```
+@sample("tone").key("Eb").scale("minor").note("d1 d4 d5^ d1_")
+```
+
+- `.key("C")`, `.key("Eb")`, `.key("F#")` set the tonic (letter + optional sharp/flat, no octave needed).
+- `.scale("major")` / `.scale("minor")` select the interval map (aliases: `ionian`, `aeolian`).
+- Degree tokens inside `.note()` use `d1`–`d7`, optional octave nudges (`d5^`, `d2_`), and durations (`d3/8`).
+- Degrees resolve relative to the active key/scale, then `.octave()` / `.transpose()` apply afterward.
+- Missing key/scale defaults to C major with a one-time warning.
 
 Durations use `/len` relative to a quarter note; missing `/len` defaults to `/4`. Notes always belong to the currently bound
 instrument. The `tone` sample stays available for melodic lines; if a sound exposes a pitched map, Musika snaps to the nearest

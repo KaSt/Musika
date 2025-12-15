@@ -22,12 +22,25 @@ typedef struct {
     size_t warned_count;
 } ModifierWarningState;
 
+typedef enum {
+    SCALE_MODE_MAJOR,
+    SCALE_MODE_MINOR,
+} ScaleMode;
+
 typedef struct {
     double duration_beats;
     double playback_rate;
     int midi_note;
     bool has_midi_note;
 } NoteStep;
+
+typedef struct {
+    bool has_key;
+    int key_semitone;
+    bool has_scale;
+    ScaleMode scale;
+    bool degree_default_warned;
+} MusicalContext;
 
 static void add_step(Pattern *pattern, const PatternStep *step) {
     if (pattern->step_count >= sizeof(pattern->steps) / sizeof(pattern->steps[0])) return;
@@ -61,6 +74,40 @@ static int semitone_for_letter(char c) {
         case 'b': return 11;
         default: return -1;
     }
+}
+
+static int parse_key_name(const char *text, bool *ok) {
+    if (ok) *ok = false;
+    if (!text || text[0] == '\0') return 0;
+    int base = semitone_for_letter(text[0]);
+    if (base < 0) return 0;
+    int accidental = 0;
+    char accidental_char = text[1];
+    if (accidental_char == '#' || tolower((unsigned char)accidental_char) == 'b') {
+        accidental = (accidental_char == '#') ? 1 : -1;
+        if (text[2] != '\0') return 0;
+    } else if (text[1] != '\0') {
+        return 0;
+    }
+    if (ok) *ok = true;
+    int semitone = base + accidental;
+    if (semitone < 0) semitone += 12;
+    if (semitone >= 12) semitone -= 12;
+    return semitone;
+}
+
+static ScaleMode parse_scale_mode(const char *text, bool *ok) {
+    if (ok) *ok = false;
+    if (!text) return SCALE_MODE_MAJOR;
+    if (equals_ci(text, "major") || equals_ci(text, "ionian")) {
+        if (ok) *ok = true;
+        return SCALE_MODE_MAJOR;
+    }
+    if (equals_ci(text, "minor") || equals_ci(text, "aeolian")) {
+        if (ok) *ok = true;
+        return SCALE_MODE_MINOR;
+    }
+    return SCALE_MODE_MAJOR;
 }
 
 static bool pick_pitched_variant(const SampleSound *sound, int midi_note, size_t *variant_index, int *base_midi) {
@@ -131,7 +178,7 @@ static void record_modifier_warning(ModifierWarningState *state, const char *nam
     }
 }
 
-static NoteParseResult parse_note_token(const char *token, NoteStep *out_step) {
+static NoteParseResult parse_note_token(const char *token, MusicalContext *context, NoteStep *out_step) {
     if (!token || !out_step) return NOTE_PARSE_NONE;
 
     char token_copy[TOKEN_BUFFER_LEN];
@@ -164,7 +211,51 @@ static NoteParseResult parse_note_token(const char *token, NoteStep *out_step) {
     bool parsed = false;
     bool clamped = false;
 
-    if (token_copy[0] == 'k' || token_copy[0] == 'K') {
+    if ((token_copy[0] == 'd' || token_copy[0] == 'D') && isdigit((unsigned char)token_copy[1])) {
+        size_t idx = 1;
+        int degree = 0;
+        while (isdigit((unsigned char)token_copy[idx])) {
+            degree = (degree * 10) + (token_copy[idx] - '0');
+            idx++;
+        }
+        int octave_delta = 0;
+        while (token_copy[idx] == '^' || token_copy[idx] == '_') {
+            octave_delta += (token_copy[idx] == '^') ? 1 : -1;
+            idx++;
+        }
+        if (token_copy[idx] != '\0' || degree < 1 || degree > 7) {
+            fprintf(stderr, "Warning: unknown note token '%s' (treated as rest)\n", token_copy);
+        } else {
+            int key_semitone = 0;
+            ScaleMode scale_mode = SCALE_MODE_MAJOR;
+            bool warn_default = true;
+            if (context) {
+                if (context->has_key) {
+                    key_semitone = context->key_semitone;
+                    warn_default = false;
+                }
+                if (context->has_scale) {
+                    scale_mode = context->scale;
+                    warn_default = warn_default && !context->has_key;
+                } else {
+                    warn_default = true;
+                }
+            }
+            if (context && warn_default && !context->degree_default_warned) {
+                fprintf(stderr, "Warning: degree used without .key/.scale; defaulting to C major\n");
+                context->degree_default_warned = true;
+            }
+
+            static const int major_offsets[7] = {0, 2, 4, 5, 7, 9, 11};
+            static const int minor_offsets[7] = {0, 2, 3, 5, 7, 8, 10};
+            int offset = (scale_mode == SCALE_MODE_MINOR) ? minor_offsets[degree - 1] : major_offsets[degree - 1];
+            int base_midi = (5 * 12) + key_semitone; // middle octave (C4 = 60)
+            midi = base_midi + offset + (octave_delta * 12);
+            if (midi < 0) midi = 0;
+            if (midi > 127) midi = 127;
+            parsed = true;
+        }
+    } else if (token_copy[0] == 'k' || token_copy[0] == 'K') {
         char *end = NULL;
         long key_num = strtol(token_copy + 1, &end, 10);
         if (end == token_copy + 1 || (*end != '\0' && !isspace((unsigned char)*end))) {
@@ -432,6 +523,7 @@ static bool token_has_duration(const char *token) {
 
 static void emit_note_token(const char *token,
                             const SampleRef *sample,
+                            MusicalContext *context,
                             Pattern *pattern,
                             bool *truncated_token_seen,
                             bool *missing_sample_warned) {
@@ -446,7 +538,7 @@ static void emit_note_token(const char *token,
     buffer[len] = '\0';
 
     NoteStep step = {0};
-    NoteParseResult result = parse_note_token(buffer, &step);
+    NoteParseResult result = parse_note_token(buffer, context, &step);
     if (result != NOTE_PARSE_NONE) {
         append_note_step(pattern, &step, result, sample, missing_sample_warned);
     }
@@ -454,6 +546,7 @@ static void emit_note_token(const char *token,
 
 static void parse_note_sequence(const char *text,
                                 const SampleRef *sample,
+                                MusicalContext *context,
                                 Pattern *pattern,
                                 bool *truncated_token_seen,
                                 bool *missing_sample_warned) {
@@ -514,9 +607,9 @@ static void parse_note_sequence(const char *text,
                         if (truncated_token_seen) *truncated_token_seen = true;
                         combined[sizeof(combined) - 1] = '\0';
                     }
-                    emit_note_token(combined, sample, pattern, truncated_token_seen, missing_sample_warned);
+                    emit_note_token(combined, sample, context, pattern, truncated_token_seen, missing_sample_warned);
                 } else {
-                    emit_note_token(source, sample, pattern, truncated_token_seen, missing_sample_warned);
+                    emit_note_token(source, sample, context, pattern, truncated_token_seen, missing_sample_warned);
                 }
             }
             continue;
@@ -531,7 +624,7 @@ static void parse_note_sequence(const char *text,
             if (len >= sizeof(token) && truncated_token_seen) *truncated_token_seen = true;
             memcpy(token, start, copy_len);
             token[copy_len] = '\0';
-            emit_note_token(token, sample, pattern, truncated_token_seen, missing_sample_warned);
+            emit_note_token(token, sample, context, pattern, truncated_token_seen, missing_sample_warned);
         }
     }
 }
@@ -542,6 +635,7 @@ static void parse_modifier_chain(const char *text,
                                  bool *truncated_token_seen,
                                  bool *missing_sample_warned,
                                  ModifierWarningState *modifier_warnings,
+                                 MusicalContext *musical_context,
                                  bool *pitch_clamp_warned) {
     size_t start_index = pattern ? pattern->step_count : 0;
     int semitone_shift = 0;
@@ -594,7 +688,7 @@ static void parse_modifier_chain(const char *text,
             if (!copy_quoted_string(&arg_ptr, note_text, sizeof(note_text), truncated_token_seen)) {
                 fprintf(stderr, "Warning: .note() expects a quoted string\n");
             } else {
-                parse_note_sequence(note_text, sample, pattern, truncated_token_seen, missing_sample_warned);
+                parse_note_sequence(note_text, sample, musical_context, pattern, truncated_token_seen, missing_sample_warned);
             }
         } else if (equals_ci(name, "octave")) {
             const char *arg_ptr = skip_spaces(arg_buf);
@@ -615,6 +709,36 @@ static void parse_modifier_chain(const char *text,
                 fprintf(stderr, "Warning: .transpose() expects a numeric argument\n");
             } else {
                 semitone_shift += (int)delta;
+            }
+        } else if (equals_ci(name, "key")) {
+            const char *arg_ptr = arg_buf;
+            char key_text[32];
+            if (!copy_quoted_string(&arg_ptr, key_text, sizeof(key_text), truncated_token_seen)) {
+                fprintf(stderr, "Warning: .key() expects a quoted key name like \"C#\"\n");
+            } else {
+                bool ok = false;
+                int semitone = parse_key_name(key_text, &ok);
+                if (!ok) {
+                    fprintf(stderr, "Warning: unknown key '%s' (ignored)\n", key_text);
+                } else if (musical_context) {
+                    musical_context->key_semitone = semitone;
+                    musical_context->has_key = true;
+                }
+            }
+        } else if (equals_ci(name, "scale")) {
+            const char *arg_ptr = arg_buf;
+            char scale_text[32];
+            if (!copy_quoted_string(&arg_ptr, scale_text, sizeof(scale_text), truncated_token_seen)) {
+                fprintf(stderr, "Warning: .scale() expects a quoted scale name like \"major\"\n");
+            } else {
+                bool ok = false;
+                ScaleMode mode = parse_scale_mode(scale_text, &ok);
+                if (!ok) {
+                    fprintf(stderr, "Warning: unknown scale '%s' (ignored)\n", scale_text);
+                } else if (musical_context) {
+                    musical_context->scale = mode;
+                    musical_context->has_scale = true;
+                }
             }
         } else {
             if (!modifier_warned(modifier_warnings, name)) {
@@ -776,6 +900,8 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
     bool have_current_sample = false;
     ModifierWarningState modifier_warnings = {0};
     bool pitch_clamp_warned = false;
+    MusicalContext musical_context = {0};
+    musical_context.scale = SCALE_MODE_MAJOR;
 
     for (size_t i = 0; i < line_count; ++i) {
         char *line = lines[i];
@@ -788,12 +914,14 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
         if (parse_sample_invocation(trimmed, default_registry, user_registry, &parsed_sample, &rest, &truncated_token_seen)) {
             current_sample = parsed_sample;
             have_current_sample = true;
-            parse_modifier_chain(rest, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &pitch_clamp_warned);
+            musical_context = (MusicalContext){0};
+            musical_context.scale = SCALE_MODE_MAJOR;
+            parse_modifier_chain(rest, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &musical_context, &pitch_clamp_warned);
             continue;
         }
 
         if (have_current_sample && trimmed[0] == '.') {
-            parse_modifier_chain(trimmed, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &pitch_clamp_warned);
+            parse_modifier_chain(trimmed, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &musical_context, &pitch_clamp_warned);
             continue;
         }
 
@@ -816,7 +944,7 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
             token[copy_len] = '\0';
 
             NoteStep note_step = {0};
-            NoteParseResult note_result = parse_note_token(token, &note_step);
+            NoteParseResult note_result = parse_note_token(token, NULL, &note_step);
             if (note_result != NOTE_PARSE_NONE) {
                 if (note_result == NOTE_PARSE_OK) {
                     deprecated_notes = true;

@@ -1,0 +1,1 @@
+@sample("tone").key("C").scale("major").note("d1/4 d1/4 d5/4 d5/4 d6/4 d6/4 d5/2")
