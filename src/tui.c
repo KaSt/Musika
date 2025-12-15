@@ -133,7 +133,9 @@ static void backspace(EditorState *state) {
 }
 
 static void delete_line(EditorState *state) {
-    text_buffer_delete_line(&state->ctx->session->buffer, state->row);
+    TextBuffer *buf = &state->ctx->session->buffer;
+    if (buf->length == 0) return;
+    text_buffer_delete_line(buf, state->row);
     clamp_cursor(state);
     state->ctx->session->modified = true;
 }

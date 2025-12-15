@@ -33,8 +33,8 @@ Generate the kick sample (only needed once per checkout or after cleaning `asset
 
 Startup modes:
 
-- **Play a file immediately:** `./musika song.musika` (or `./musika --play song.musika`) loads, compiles, and starts playback. Press `Ctrl+C` to stop.
-- **Open the fullscreen editor:** `./musika` with no args, or `./musika --edit [file]`, opens a Vim-like TUI editor with an empty buffer or the provided file.
+- **Play a file immediately:** `./musika song.musika` (or `./musika --play song.musika`) loads, compiles, and starts playback. Press `Ctrl+C` to stop. If both a positional file and `--play` are supplied, `--play` wins.
+- **Open the fullscreen editor:** `./musika` with no args, or `./musika --edit [file]`, opens a Vim-like TUI editor with an empty buffer or the provided file. When `--edit` is set alongside a positional file and `--play`, the positional file is opened.
 - **Compile check only:** `./musika --check file.musika` parses the file and exits 0/1.
 - **Version:** `./musika --version`
 
@@ -127,6 +127,13 @@ Only `.note(...)` produces audible events today; other chained modifiers such as
 `@sample(...)` still parse but print a deprecation warning—bind notes to a sample explicitly whenever possible.
 
 Playback articulation: pitched notes keep a short release tail (legato-lite) so repeated notes or overlapping chords can decay naturally instead of cutting off the moment a new note starts. There is no sustain pedal or extra API—this is a built-in smoothing pass for back-to-back melodic events.
+
+### Manual regression checklist
+
+- `dd` deletes only the current line in NORMAL mode (cursor stays on a valid line/col).
+- `./musika <file>` starts playback immediately; `Ctrl+C` stops.
+- `./musika --edit <file>` opens the fullscreen editor preloaded with that file.
+- `:w` writes to the current file, `:q` blocks if the buffer is modified, and `:q!` exits without saving.
 
 Manual verification (quick sanity checks):
 

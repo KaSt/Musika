@@ -230,18 +230,27 @@ int main(int argc, char **argv) {
         return rc;
     }
 
-    if (play_file && positional_file) {
-        fprintf(stderr, "Both positional file and --play provided; using --play.\n");
-    }
-
     int rc = 0;
-    if (force_edit || (!play_file && !positional_file)) {
-        const char *to_open = force_edit ? (positional_file ? positional_file : play_file) : NULL;
-        rc = run_editor_mode(&runtime, to_open);
-    } else if (play_file) {
-        rc = run_play_mode(&runtime, play_file);
-    } else if (positional_file) {
-        rc = run_play_mode(&runtime, positional_file);
+    const char *play_target = play_file ? play_file : positional_file;
+
+    if (force_edit || (!play_target)) {
+        const char *edit_target = NULL;
+        if (force_edit) {
+            if (positional_file) {
+                edit_target = positional_file;
+                if (play_file && play_file != positional_file) {
+                    fprintf(stderr, "Both positional file and --play provided; opening positional file in editor.\n");
+                }
+            } else if (play_file) {
+                edit_target = play_file;
+            }
+        }
+        rc = run_editor_mode(&runtime, edit_target);
+    } else {
+        if (play_file && positional_file) {
+            fprintf(stderr, "Both positional file and --play provided; using --play.\n");
+        }
+        rc = run_play_mode(&runtime, play_target);
     }
 
     musika_runtime_free(&runtime);
