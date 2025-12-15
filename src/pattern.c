@@ -342,13 +342,15 @@ static void append_note_step(Pattern *pattern,
                              const NoteStep *note_step,
                              NoteParseResult result,
                              const SampleRef *sample,
-                             bool *missing_sample_warned) {
+                             bool *missing_sample_warned,
+                             bool advance_time) {
     if (!pattern || !note_step) return;
     PatternStep step = {0};
     step.duration_beats = note_step->duration_beats;
     step.playback_rate = note_step->playback_rate;
     step.midi_note = note_step->midi_note;
     step.has_midi_note = note_step->has_midi_note;
+    step.advance_time = advance_time;
 
     if (result == NOTE_PARSE_OK || result == NOTE_PARSE_HIT) {
         if (sample && sample->valid) {
@@ -518,7 +520,8 @@ static void emit_note_token(const char *token,
                             MusicalContext *context,
                             Pattern *pattern,
                             bool *truncated_token_seen,
-                            bool *missing_sample_warned) {
+                            bool *missing_sample_warned,
+                            bool advance_time) {
     if (!token || !pattern) return;
     char buffer[TOKEN_BUFFER_LEN];
     size_t len = strlen(token);
@@ -532,7 +535,7 @@ static void emit_note_token(const char *token,
     NoteStep step = {0};
     NoteParseResult result = parse_note_token(buffer, context, &step);
     if (result != NOTE_PARSE_NONE) {
-        append_note_step(pattern, &step, result, sample, missing_sample_warned);
+        append_note_step(pattern, &step, result, sample, missing_sample_warned, advance_time);
     }
 }
 
@@ -541,7 +544,8 @@ static void parse_note_sequence(const char *text,
                                 MusicalContext *context,
                                 Pattern *pattern,
                                 bool *truncated_token_seen,
-                                bool *missing_sample_warned) {
+                                bool *missing_sample_warned,
+                                bool *percussion_chord_warned) {
     if (!text || !pattern) return;
     const char *p = text;
     while (p && *p) {
@@ -591,18 +595,35 @@ static void parse_note_sequence(const char *text,
                 p = after_group;
             }
 
+            bool pitched_sample = false;
+            if (sample && sample->valid && sample->sound) {
+                pitched_sample = (sample->sound->pitched_entry_count > 0) ||
+                                 (sample->sound->name && strcmp(sample->sound->name, "tone") == 0);
+            }
+
+            bool treat_as_chord = (group_count > 1) && pitched_sample;
+            if (group_count > 1 && !pitched_sample) {
+                if (percussion_chord_warned && !*percussion_chord_warned) {
+                    fprintf(stderr, "Warning: chords on percussive samples play the first note only\n");
+                    *percussion_chord_warned = true;
+                }
+                group_count = group_count > 0 ? 1 : 0;
+            }
+
             for (size_t i = 0; i < group_count; ++i) {
                 const char *source = group_tokens[i];
                 char combined[TOKEN_BUFFER_LEN];
-                if (group_duration[0] != '\0' && !token_has_duration(source)) {
+                bool needs_duration = group_duration[0] != '\0' && !token_has_duration(source);
+                const char *token_to_emit = source;
+                if (needs_duration) {
                     if (snprintf(combined, sizeof(combined), "%s/%s", source, group_duration) >= (int)sizeof(combined)) {
                         if (truncated_token_seen) *truncated_token_seen = true;
                         combined[sizeof(combined) - 1] = '\0';
                     }
-                    emit_note_token(combined, sample, context, pattern, truncated_token_seen, missing_sample_warned);
-                } else {
-                    emit_note_token(source, sample, context, pattern, truncated_token_seen, missing_sample_warned);
+                    token_to_emit = combined;
                 }
+                bool advance_time = !treat_as_chord || i == 0;
+                emit_note_token(token_to_emit, sample, context, pattern, truncated_token_seen, missing_sample_warned, advance_time);
             }
             continue;
         }
@@ -616,7 +637,7 @@ static void parse_note_sequence(const char *text,
             if (len >= sizeof(token) && truncated_token_seen) *truncated_token_seen = true;
             memcpy(token, start, copy_len);
             token[copy_len] = '\0';
-            emit_note_token(token, sample, context, pattern, truncated_token_seen, missing_sample_warned);
+            emit_note_token(token, sample, context, pattern, truncated_token_seen, missing_sample_warned, true);
         }
     }
 }
@@ -628,7 +649,8 @@ static void parse_modifier_chain(const char *text,
                                  bool *missing_sample_warned,
                                  ModifierWarningState *modifier_warnings,
                                  MusicalContext *musical_context,
-                                 bool *pitch_clamp_warned) {
+                                 bool *pitch_clamp_warned,
+                                 bool *percussion_chord_warned) {
     size_t start_index = pattern ? pattern->step_count : 0;
     int semitone_shift = 0;
     const char *p = text;
@@ -680,7 +702,13 @@ static void parse_modifier_chain(const char *text,
             if (!copy_quoted_string(&arg_ptr, note_text, sizeof(note_text), truncated_token_seen)) {
                 fprintf(stderr, "Warning: .note() expects a quoted string\n");
             } else {
-                parse_note_sequence(note_text, sample, musical_context, pattern, truncated_token_seen, missing_sample_warned);
+                parse_note_sequence(note_text,
+                                   sample,
+                                   musical_context,
+                                   pattern,
+                                   truncated_token_seen,
+                                   missing_sample_warned,
+                                   percussion_chord_warned);
             }
         } else if (equals_ci(name, "octave")) {
             const char *arg_ptr = skip_spaces(arg_buf);
@@ -892,6 +920,7 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
     bool have_current_sample = false;
     ModifierWarningState modifier_warnings = {0};
     bool pitch_clamp_warned = false;
+    bool percussion_chord_warned = false;
     MusicalContext musical_context = {0};
     musical_context.scale = SCALE_MODE_MAJOR;
 
@@ -903,17 +932,33 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
 
         SampleRef parsed_sample = {0};
         const char *rest = NULL;
-        if (parse_sample_invocation(trimmed, default_registry, user_registry, &parsed_sample, &rest, &truncated_token_seen)) {
-            current_sample = parsed_sample;
-            have_current_sample = true;
-            musical_context = (MusicalContext){0};
-            musical_context.scale = SCALE_MODE_MAJOR;
-            parse_modifier_chain(rest, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &musical_context, &pitch_clamp_warned);
-            continue;
-        }
+            if (parse_sample_invocation(trimmed, default_registry, user_registry, &parsed_sample, &rest, &truncated_token_seen)) {
+                current_sample = parsed_sample;
+                have_current_sample = true;
+                musical_context = (MusicalContext){0};
+                musical_context.scale = SCALE_MODE_MAJOR;
+                parse_modifier_chain(rest,
+                                    &current_sample,
+                                    out_pattern,
+                                    &truncated_token_seen,
+                                    &missing_sample_warned,
+                                    &modifier_warnings,
+                                    &musical_context,
+                                    &pitch_clamp_warned,
+                                    &percussion_chord_warned);
+                continue;
+            }
 
         if (have_current_sample && trimmed[0] == '.') {
-            parse_modifier_chain(trimmed, &current_sample, out_pattern, &truncated_token_seen, &missing_sample_warned, &modifier_warnings, &musical_context, &pitch_clamp_warned);
+            parse_modifier_chain(trimmed,
+                                 &current_sample,
+                                 out_pattern,
+                                 &truncated_token_seen,
+                                 &missing_sample_warned,
+                                 &modifier_warnings,
+                                 &musical_context,
+                                 &pitch_clamp_warned,
+                                 &percussion_chord_warned);
             continue;
         }
 
@@ -947,9 +992,14 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
                             fprintf(stderr, "Warning: default 'tone' sample unavailable (notes become rests)\n");
                         }
                     }
-                    append_note_step(out_pattern, &note_step, note_result, tone_ref.valid ? &tone_ref : NULL, &missing_sample_warned);
+                    append_note_step(out_pattern,
+                                     &note_step,
+                                     note_result,
+                                     tone_ref.valid ? &tone_ref : NULL,
+                                     &missing_sample_warned,
+                                     true);
                 } else {
-                    append_note_step(out_pattern, &note_step, note_result, NULL, &missing_sample_warned);
+                    append_note_step(out_pattern, &note_step, note_result, NULL, &missing_sample_warned, true);
                 }
                 continue;
             }
@@ -961,6 +1011,7 @@ bool pattern_from_lines(char **lines, size_t line_count, const SampleRegistry *d
             step.playback_rate = 1.0;
             step.has_midi_note = false;
             step.midi_note = 0;
+            step.advance_time = true;
             add_step(out_pattern, &step);
         }
     }

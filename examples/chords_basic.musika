@@ -1,0 +1,4 @@
+@sample("piano")
+  .key("C")
+  .scale("major")
+  .note("<d1 d3 d5>/4 <d4 d6 d1^>/4")
