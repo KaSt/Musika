@@ -73,6 +73,13 @@ The transport still schedules ~200ms ahead of the audio callback so tempo-stable
 - Sharps (`#`), flats (`b`), and octave numbers belong to the note syntax itself. Key/scale helpers such as
   `major`/`minor` will surface later as separate `.key()`/`.scale()` modifiers rather than inline note tokens.
 
+Examples of pitch helpers on a melodic chain:
+
+```
+@sample("tone").note("c4 e4 g4").octave(1)
+@sample("tone").note("c4 e4 g4").transpose(-3)
+```
+
 Durations use `/len` relative to a quarter note; missing `/len` defaults to `/4`. Notes always belong to the currently bound
 instrument. The `tone` sample stays available for melodic lines; if a sound exposes a pitched map, Musika snaps to the nearest
 base entry before adjusting playback rate. Instruments without pitched maps ignore MIDI-derived playback-rate changes so

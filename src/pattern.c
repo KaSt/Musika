@@ -600,7 +600,8 @@ static void parse_modifier_chain(const char *text,
             const char *arg_ptr = skip_spaces(arg_buf);
             char *end = NULL;
             long delta = strtol(arg_ptr, &end, 10);
-            if (end == arg_ptr) {
+            const char *rest = skip_spaces(end);
+            if (end == arg_ptr || *rest != '\0') {
                 fprintf(stderr, "Warning: .octave() expects a numeric argument\n");
             } else {
                 semitone_shift += (int)(delta * 12);
@@ -609,7 +610,8 @@ static void parse_modifier_chain(const char *text,
             const char *arg_ptr = skip_spaces(arg_buf);
             char *end = NULL;
             long delta = strtol(arg_ptr, &end, 10);
-            if (end == arg_ptr) {
+            const char *rest = skip_spaces(end);
+            if (end == arg_ptr || *rest != '\0') {
                 fprintf(stderr, "Warning: .transpose() expects a numeric argument\n");
             } else {
                 semitone_shift += (int)delta;

@@ -1,5 +1,3 @@
 @sample("tone").note("e4/8 d#4/8 e4/8 d#4/8 e4/8 b3/8 d4/8 c4/8 a3/2").octave(1).transpose(1)
 @sample("bd").note("x ~ x ~")
 @sample("hh").note("x x x x")
-@sample("bd").note("x ~ x ~")
-@sample("hh").note("x x x x")
