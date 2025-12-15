@@ -1,0 +1,2 @@
+@sample("bd").note("x x x x")
+@sample("hh").note("x x x x").every(2, "fast 2")

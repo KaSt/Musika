@@ -1,0 +1,1 @@
+@sample("tone").note("c4 d4 e4 g4").every(4, "fast 2")

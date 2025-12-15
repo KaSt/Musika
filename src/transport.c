@@ -21,6 +21,38 @@ static bool file_exists(const char *path) {
     return path && stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+static const PatternChain *find_chain(const Pattern *pattern, int chain_id) {
+    if (!pattern || chain_id < 0) return NULL;
+    for (size_t i = 0; i < pattern->chain_count; ++i) {
+        if (pattern->chains[i].id == chain_id) {
+            return &pattern->chains[i];
+        }
+    }
+    return NULL;
+}
+
+static double chain_time_scale(const Pattern *pattern, const PatternStep *step, uint64_t cycle_number) {
+    double scale = (step && step->time_scale > 0.0) ? step->time_scale : 1.0;
+    const PatternChain *chain = find_chain(pattern, step ? step->chain_id : -1);
+    if (!chain) return scale;
+
+    if (chain->base_time_scale > 0.0) {
+        scale *= chain->base_time_scale;
+    }
+
+    if (chain->has_every && chain->every_interval > 0 && chain->every_factor > 0) {
+        if (cycle_number > 0 && (cycle_number % (uint64_t)chain->every_interval) == 0) {
+            if (chain->every_type == TIME_TRANSFORM_FAST) {
+                scale /= (double)chain->every_factor;
+            } else if (chain->every_type == TIME_TRANSFORM_SLOW) {
+                scale *= (double)chain->every_factor;
+            }
+        }
+    }
+
+    return scale;
+}
+
 static const char *variant_value_for_ref(const SampleRef *ref) {
     if (!ref || !ref->sound) return NULL;
     const SampleSound *sound = ref->sound;
@@ -184,13 +216,15 @@ static void *transport_thread(void *user) {
 
         while (t->next_event_time <= horizon) {
             PatternStep *step = &pattern->steps[t->next_step];
+            uint64_t cycle_number = t->cycle_count + 1;
+            double scaled_duration_beats = step->duration_beats * chain_time_scale(pattern, step, cycle_number);
             if (step->sample.valid) {
                 const AudioSample *sample = load_sample_for_ref(t, &step->sample);
                 if (sample) {
                     uint64_t start_frame = (uint64_t)(t->next_event_time * (double)t->audio->sample_rate);
                     uint64_t note_duration_frames = 0;
                     if (step->has_midi_note) {
-                        double seconds = step->duration_beats * t->seconds_per_beat;
+                        double seconds = scaled_duration_beats * t->seconds_per_beat;
                         note_duration_frames = (uint64_t)(seconds * (double)t->audio->sample_rate);
                         if (note_duration_frames == 0) {
                             note_duration_frames = 1;
@@ -205,9 +239,12 @@ static void *transport_thread(void *user) {
                 }
             }
             if (step->advance_time) {
-                t->next_event_time += step->duration_beats * t->seconds_per_beat;
+                t->next_event_time += scaled_duration_beats * t->seconds_per_beat;
             }
             t->next_step = (t->next_step + 1) % pattern->step_count;
+            if (t->next_step == 0) {
+                t->cycle_count++;
+            }
         }
 
         sleep_ms(10);
@@ -226,6 +263,7 @@ bool transport_start(Transport *transport, AudioEngine *audio, AudioSample *samp
     atomic_store(&transport->playing, false);
     transport->next_event_time = 0.0;
     transport->next_step = 0;
+    transport->cycle_count = 0;
     transport->sample_cache_count = 0;
 
     if (pthread_create(&transport->thread, NULL, transport_thread, transport) != 0) {
@@ -249,12 +287,14 @@ void transport_set_pattern(Transport *transport, const Pattern *pattern) {
     atomic_store(&transport->active_pattern, next);
     transport->next_step = 0;
     transport->next_event_time = audio_engine_time_seconds(transport->audio);
+    transport->cycle_count = 0;
 }
 
 void transport_play(Transport *transport) {
     if (!transport) return;
     transport->next_event_time = audio_engine_time_seconds(transport->audio);
     transport->next_step = 0;
+    transport->cycle_count = 0;
     atomic_store(&transport->playing, true);
 }
 
