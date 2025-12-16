@@ -90,6 +90,11 @@ bool text_buffer_load_file(TextBuffer *buffer, const char *path) {
         }
         free(buffer->lines[row]);
         buffer->lines[row] = strdup_safe(line);
+        if (!buffer->lines[row]) {
+            free(line);
+            fclose(f);
+            return false;
+        }
     }
 
     free(line);
