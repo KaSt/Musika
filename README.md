@@ -31,22 +31,22 @@ Generate the kick sample (only needed once per checkout or after cleaning `asset
 ./scripts/fetch_kick.sh
 ```
 
-Audible beep test:
-```bash
-./musika --beep
-```
+Startup modes and precedence (conflicts print an error):
 
-Live coding loop:
-```bash
-./musika
-```
+- **Play a file immediately:** `./musika song.musika` or `./musika --play song.musika` loads, compiles, and starts playback. `Ctrl+C` stops.
+- **Open the fullscreen editor:** `./musika` with no args opens an empty buffer. `./musika --edit [file]` opens the editor with an optional file. `--edit` cannot be mixed with `--play`/`--check`/`--midi-dump`.
+- **Compile check only:** `./musika --check file.musika` parses the file and exits 0/1. Additional positional files are rejected.
+- **MIDI event dump (test mode):** `./musika --midi-dump out.json file.musika` compiles the pattern and writes deterministic note_on/note_off events to JSON (beats + seconds). No audio device is opened.
+- **Version:** `./musika --version`
 
-Commands inside the REPL:
-- `:edit` – open the inline buffer (finish with a `.` line).
-- `:eval` – parse the buffer and arm it as the active pattern.
-- `:play` / `:stop` – start or pause transport without tearing down the audio device.
-- `:panic` – silence queued audio immediately.
-- `:help` – show the full list.
+### Editor basics
+
+- Modes: `ESC` for **NORMAL**, `i` for **INSERT**. Normal mode uses `h/j/k/l` to move.
+- Commands: `:` enters the command prompt. Supported commands:
+  - `:play` / `:stop` – compile + start playback or pause.
+  - `:w` – save to the current filename; `:w <path>` saves as.
+  - `:q` – quit (blocked if modified), `:q!` – force quit, `:wq` – save and quit.
+- Editing: typed characters insert in INSERT mode; `Backspace` deletes; `Enter` inserts a newline; `dd` deletes a line.
 
 Write patterns by first binding an instrument, then chaining notes and modifiers:
 
@@ -128,6 +128,14 @@ Only `.note(...)` produces audible events today; other chained modifiers such as
 `@sample(...)` still parse but print a deprecation warning—bind notes to a sample explicitly whenever possible.
 
 Playback articulation: pitched notes keep a short release tail (legato-lite) so repeated notes or overlapping chords can decay naturally instead of cutting off the moment a new note starts. There is no sustain pedal or extra API—this is a built-in smoothing pass for back-to-back melodic events.
+
+### Manual regression checklist
+
+- `dd` deletes only the current line in NORMAL mode (cursor stays on a valid line/col).
+- `./musika <file>` starts playback immediately; `Ctrl+C` stops.
+- `./musika --edit <file>` opens the fullscreen editor preloaded with that file.
+- `:w` writes to the current file, `:q` blocks if the buffer is modified, and `:q!` exits without saving.
+- `./musika --midi-dump out.json <file>` writes deterministic note_on/note_off events without mutating the buffer.
 
 Manual verification (quick sanity checks):
 

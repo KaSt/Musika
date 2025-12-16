@@ -14,6 +14,9 @@ endif
 musika: $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LIBS)
 
+test: musika
+	./tests/midi_dump_test.sh
+
 clean:
 	rm -f $(OBJ) musika
 
