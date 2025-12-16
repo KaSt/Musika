@@ -140,19 +140,20 @@ void text_buffer_insert_newline(TextBuffer *buffer, size_t row, size_t col) {
         free(tail);
         return;
     }
-
-    free(buffer->lines[row]);
-    buffer->lines[row] = head;
-
     char **new_lines = realloc(buffer->lines, sizeof(char *) * (buffer->length + 1));
     if (!new_lines) {
+        free(head);
         free(tail);
         return;
     }
+
+    char *original_line = buffer->lines[row];
     buffer->lines = new_lines;
     memmove(&buffer->lines[row + 2], &buffer->lines[row + 1], sizeof(char *) * (buffer->length - (row + 1)));
+    buffer->lines[row] = head;
     buffer->lines[row + 1] = tail;
     buffer->length += 1;
+    free(original_line);
 }
 
 void text_buffer_delete_char(TextBuffer *buffer, size_t row, size_t col) {

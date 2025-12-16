@@ -31,11 +31,12 @@ Generate the kick sample (only needed once per checkout or after cleaning `asset
 ./scripts/fetch_kick.sh
 ```
 
-Startup modes:
+Startup modes and precedence (conflicts print an error):
 
-- **Play a file immediately:** `./musika song.musika` (or `./musika --play song.musika`) loads, compiles, and starts playback. Press `Ctrl+C` to stop. If both a positional file and `--play` are supplied, `--play` wins.
-- **Open the fullscreen editor:** `./musika` with no args, or `./musika --edit [file]`, opens a Vim-like TUI editor with an empty buffer or the provided file. When `--edit` is set alongside a positional file and `--play`, the positional file is opened.
-- **Compile check only:** `./musika --check file.musika` parses the file and exits 0/1.
+- **Play a file immediately:** `./musika song.musika` or `./musika --play song.musika` loads, compiles, and starts playback. `Ctrl+C` stops.
+- **Open the fullscreen editor:** `./musika` with no args opens an empty buffer. `./musika --edit [file]` opens the editor with an optional file. `--edit` cannot be mixed with `--play`/`--check`/`--midi-dump`.
+- **Compile check only:** `./musika --check file.musika` parses the file and exits 0/1. Additional positional files are rejected.
+- **MIDI event dump (test mode):** `./musika --midi-dump out.json file.musika` compiles the pattern and writes deterministic note_on/note_off events to JSON (beats + seconds). No audio device is opened.
 - **Version:** `./musika --version`
 
 ### Editor basics
@@ -134,6 +135,7 @@ Playback articulation: pitched notes keep a short release tail (legato-lite) so 
 - `./musika <file>` starts playback immediately; `Ctrl+C` stops.
 - `./musika --edit <file>` opens the fullscreen editor preloaded with that file.
 - `:w` writes to the current file, `:q` blocks if the buffer is modified, and `:q!` exits without saving.
+- `./musika --midi-dump out.json <file>` writes deterministic note_on/note_off events without mutating the buffer.
 
 Manual verification (quick sanity checks):
 

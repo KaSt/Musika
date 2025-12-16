@@ -10,6 +10,7 @@
 #include "pattern.h"
 #include "samplemap.h"
 #include "session.h"
+#include "midi_dump.h"
 #include "transport.h"
 #include "tui.h"
 #include "../audio/audio.h"
@@ -179,8 +180,35 @@ static int run_editor_mode(MusikaRuntime *rt, const char *path) {
     return rc;
 }
 
+static int run_midi_dump_mode(MusikaRuntime *rt, const char *input_path, const char *output_path) {
+    if (!rt || !input_path || !output_path) return 1;
+    MusikaSession session;
+    session_init(&session);
+    if (!session_load_file(&session, input_path)) {
+        fprintf(stderr, "Failed to open %s\n", input_path);
+        session_free(&session);
+        return 1;
+    }
+
+    Pattern compiled;
+    if (!session_compile(&session, &rt->default_registry, &rt->user_registry, &compiled)) {
+        fprintf(stderr, "Failed to compile %s\n", input_path);
+        session_free(&session);
+        return 1;
+    }
+
+    bool ok = midi_dump_pattern(&compiled, rt->config.tempo_bpm, output_path);
+    session_free(&session);
+    if (!ok) {
+        fprintf(stderr, "Failed to write MIDI dump to %s\n", output_path);
+        return 1;
+    }
+    printf("Wrote MIDI dump to %s\n", output_path);
+    return 0;
+}
+
 static void print_usage(const char *prog) {
-    printf("Usage: %s [--edit] [--play <file>] [--check <file>] [file]\n", prog);
+    printf("Usage: %s [--edit] [--play <file>] [--check <file>] [--midi-dump <path>] [file]\n", prog);
     printf("       %s --version\n", prog);
 }
 
@@ -188,8 +216,11 @@ int main(int argc, char **argv) {
     const char *positional_file = NULL;
     const char *play_file = NULL;
     const char *check_file = NULL;
+    const char *midi_dump_path = NULL;
     bool force_edit = false;
     bool show_version = false;
+
+    bool error = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--play") == 0 && i + 1 < argc) {
@@ -198,6 +229,8 @@ int main(int argc, char **argv) {
             force_edit = true;
         } else if (strcmp(argv[i], "--check") == 0 && i + 1 < argc) {
             check_file = argv[++i];
+        } else if (strcmp(argv[i], "--midi-dump") == 0 && i + 1 < argc) {
+            midi_dump_path = argv[++i];
         } else if (strcmp(argv[i], "--version") == 0) {
             show_version = true;
         } else if (strcmp(argv[i], "--help") == 0) {
@@ -208,9 +241,16 @@ int main(int argc, char **argv) {
             print_usage(argv[0]);
             return 1;
         } else {
-            positional_file = argv[i];
+            if (positional_file) {
+                fprintf(stderr, "Multiple input files specified (%s and %s)\n", positional_file, argv[i]);
+                error = true;
+            } else {
+                positional_file = argv[i];
+            }
         }
     }
+
+    if (error) return 1;
 
     if (show_version) {
         printf("Musika %s\n", MUSIKA_VERSION);
@@ -224,33 +264,109 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    int rc = 0;
+
+    typedef enum {
+        MODE_NONE,
+        MODE_PLAY,
+        MODE_EDIT,
+        MODE_CHECK,
+        MODE_MIDI_DUMP,
+    } MusikaMode;
+
+    MusikaMode mode = MODE_NONE;
+    const char *input_path = NULL;
+
     if (check_file) {
-        int rc = run_check_mode(&runtime, check_file);
-        musika_runtime_free(&runtime);
-        return rc;
+        mode = MODE_CHECK;
+        input_path = check_file;
     }
 
-    int rc = 0;
-    const char *play_target = play_file ? play_file : positional_file;
+    if (midi_dump_path) {
+        if (mode != MODE_NONE) {
+            fprintf(stderr, "--midi-dump cannot be combined with other modes.\n");
+            musika_runtime_free(&runtime);
+            return 1;
+        }
+        mode = MODE_MIDI_DUMP;
+    }
 
-    if (force_edit || (!play_target)) {
-        const char *edit_target = NULL;
-        if (force_edit) {
-            if (positional_file) {
-                edit_target = positional_file;
-                if (play_file && play_file != positional_file) {
-                    fprintf(stderr, "Both positional file and --play provided; opening positional file in editor.\n");
-                }
-            } else if (play_file) {
-                edit_target = play_file;
+    if (force_edit) {
+        if (mode != MODE_NONE) {
+            fprintf(stderr, "--edit conflicts with other modes.\n");
+            musika_runtime_free(&runtime);
+            return 1;
+        }
+        mode = MODE_EDIT;
+    }
+
+    if (play_file) {
+        if (mode != MODE_NONE && mode != MODE_PLAY) {
+            fprintf(stderr, "--play conflicts with other modes.\n");
+            musika_runtime_free(&runtime);
+            return 1;
+        }
+        mode = MODE_PLAY;
+        input_path = play_file;
+    }
+
+    if (mode == MODE_NONE) {
+        if (positional_file) {
+            mode = MODE_PLAY;
+            input_path = positional_file;
+        } else {
+            mode = MODE_EDIT;
+        }
+    }
+
+    if (positional_file && mode == MODE_CHECK) {
+        fprintf(stderr, "--check already specifies an input file; remove the extra positional argument.\n");
+        musika_runtime_free(&runtime);
+        return 1;
+    }
+
+    if (mode == MODE_PLAY && positional_file && play_file && strcmp(positional_file, play_file) != 0) {
+        fprintf(stderr, "Both --play and positional file provided; choose one.\n");
+        musika_runtime_free(&runtime);
+        return 1;
+    }
+
+    if (mode == MODE_MIDI_DUMP && !input_path && positional_file) {
+        input_path = positional_file;
+    }
+
+    if ((mode == MODE_PLAY || mode == MODE_CHECK || mode == MODE_MIDI_DUMP) && !input_path) {
+        fprintf(stderr, "A file path is required for this mode.\n");
+        musika_runtime_free(&runtime);
+        return 1;
+    }
+
+    switch (mode) {
+        case MODE_CHECK:
+            rc = run_check_mode(&runtime, input_path);
+            break;
+        case MODE_MIDI_DUMP:
+            if (!positional_file && play_file) {
+                input_path = play_file;
+            } else if (!input_path) {
+                input_path = positional_file;
             }
-        }
-        rc = run_editor_mode(&runtime, edit_target);
-    } else {
-        if (play_file && positional_file) {
-            fprintf(stderr, "Both positional file and --play provided; using --play.\n");
-        }
-        rc = run_play_mode(&runtime, play_target);
+            if (!input_path) {
+                fprintf(stderr, "--midi-dump requires an input file path.\n");
+                rc = 1;
+                break;
+            }
+            rc = run_midi_dump_mode(&runtime, input_path, midi_dump_path);
+            break;
+        case MODE_EDIT:
+            rc = run_editor_mode(&runtime, positional_file);
+            break;
+        case MODE_PLAY:
+            rc = run_play_mode(&runtime, input_path);
+            break;
+        default:
+            rc = 1;
+            break;
     }
 
     musika_runtime_free(&runtime);

@@ -1,0 +1,6 @@
+[
+  {"time_beats":0.000000,"time_seconds":0.000000,"type":"note_on","note":60,"velocity":100,"channel":0},
+  {"time_beats":1.000000,"time_seconds":0.500000,"type":"note_off","note":60,"velocity":100,"channel":0},
+  {"time_beats":1.000000,"time_seconds":0.500000,"type":"note_on","note":62,"velocity":100,"channel":0},
+  {"time_beats":2.000000,"time_seconds":1.000000,"type":"note_off","note":62,"velocity":100,"channel":0}
+]
