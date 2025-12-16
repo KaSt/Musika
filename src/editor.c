@@ -83,6 +83,11 @@ bool text_buffer_load_file(TextBuffer *buffer, const char *path) {
 
         size_t row = buffer->length;
         text_buffer_ensure_line(buffer, row);
+        if (buffer->length <= row) {
+            free(line);
+            fclose(f);
+            return false;
+        }
         free(buffer->lines[row]);
         buffer->lines[row] = strdup_safe(line);
     }
