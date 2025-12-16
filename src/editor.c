@@ -71,6 +71,7 @@ bool text_buffer_load_file(TextBuffer *buffer, const char *path) {
     if (!f) return false;
 
     text_buffer_clear(buffer);
+
     char *line = NULL;
     size_t cap = 0;
     ssize_t read;
@@ -82,20 +83,14 @@ bool text_buffer_load_file(TextBuffer *buffer, const char *path) {
 
         size_t row = buffer->length;
         text_buffer_ensure_line(buffer, row);
-        if (buffer->length <= row) {
-            free(line);
-            fclose(f);
-            return false;
-        }
         free(buffer->lines[row]);
         buffer->lines[row] = strdup_safe(line);
     }
+
     free(line);
     fclose(f);
 
-    if (buffer->length == 0) {
-        text_buffer_ensure_line(buffer, 0);
-    }
+    if (buffer->length == 0) text_buffer_ensure_line(buffer, 0);
     return true;
 }
 
