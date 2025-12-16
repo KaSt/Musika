@@ -75,21 +75,32 @@ bool text_buffer_load_file(TextBuffer *buffer, const char *path) {
     char *line = NULL;
     size_t cap = 0;
     ssize_t read;
+    bool ok = true;
 
-    while ((read = getline(&line, &cap, f)) != -1) {
+    while (ok && (read = getline(&line, &cap, f)) != -1) {
         while (read > 0 && (line[read - 1] == '\n' || line[read - 1] == '\r')) {
             line[--read] = '\0';
         }
 
         size_t row = buffer->length;
         text_buffer_ensure_line(buffer, row);
+        if (buffer->length <= row) {
+            ok = false;
+            break;
+        }
+
         free(buffer->lines[row]);
         buffer->lines[row] = strdup_safe(line);
+        if (!buffer->lines[row]) {
+            ok = false;
+            break;
+        }
     }
 
     free(line);
     fclose(f);
 
+    if (!ok) return false;
     if (buffer->length == 0) text_buffer_ensure_line(buffer, 0);
     return true;
 }
